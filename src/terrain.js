@@ -2,7 +2,7 @@
 // Presets: flat (default, gentle swell, no gameplay effect), hills, ford (river with a crossing), forest (tree edge).
 // Everything is analytic, then cached on a 1 m grid so the sim can look up height / slope / water / forest cheaply.
 export const TERRAINS = { flat: 'Open field', hills: 'Hills', ford: 'River ford', forest: 'Forest edge' };
-export const WATER_Y = -0.05, RIVER_HALF = 9;
+export const WATER_Y = -0.05, RIVER_HALF = 9, TREE_CAP = 1200; // same count on every device so the sim's tree collision matches what is drawn
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -41,7 +41,7 @@ export function setTerrain(id = 'flat', world = 300) {
   const W = Math.ceil(world * 2) + 2, n = W * W, H = new Float32Array(n), Gx = new Float32Array(n), Gz = new Float32Array(n), K = new Uint8Array(n), F = new Uint8Array(n);
   for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { const x = i - world + 0.5, z = j - world + 0.5, p = j * W + i; H[p] = analyticHeight(x, z); K[p] = waterKind(H[p]); F[p] = Math.round(forestAt(x, z) * 255); }
   for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { const p = j * W + i, l = i > 0 ? p - 1 : p, r = i < W - 1 ? p + 1 : p, d = j > 0 ? p - W : p, u = j < W - 1 ? p + W : p; Gx[p] = (H[r] - H[l]) / (r - l || 1); Gz[p] = (H[u] - H[d]) / ((u - d) / W || 1); }
-  cache = { id, world, W, H, Gx, Gz, K, F, fx: id !== 'flat', ford: id === 'ford' ? { half: RIVER_HALF, fh: cfg.fordHalf } : null };
+  cache = { id, world, W, H, Gx, Gz, K, F, fx: id !== 'flat', ford: id === 'ford' ? { half: RIVER_HALF, fh: cfg.fordHalf } : null, tg: id === 'forest' ? treeGrid(world) : null };
   return cache;
 }
 export function cellOf(tr, x, z) { const i = clamp((x + tr.world) | 0, 0, tr.W - 1), j = clamp((z + tr.world) | 0, 0, tr.W - 1); return j * tr.W + i; }
@@ -68,4 +68,29 @@ export function treeSpots(cap) {
     if (r() < d * 1.1 && out.length / 4 < cap) out.push(px, pz, 0.8 + r() * 0.8, r() * 6.283);
   }
   return new Float32Array(out);
+}
+
+/** Trunk-plus-low-crown blocking radius of a tree of scale k (soldiers walk round trees, not through them). */
+export const treeRadius = (k) => 0.7 * k + 0.3;
+/** Spatial hash of the trees (4 m cells) for the sim's collision. */
+function treeGrid(world) {
+  const spots = treeSpots(TREE_CAP), n = spots.length / 4, cs = 4, w = world + 8, W = Math.ceil((w * 2) / cs), x = new Float32Array(n), z = new Float32Array(n), r = new Float32Array(n), cell = new Int32Array(n), start = new Int32Array(W * W + 1), ids = new Int32Array(n);
+  for (let i = 0; i < n; i++) { x[i] = spots[i * 4]; z[i] = spots[i * 4 + 1]; r[i] = treeRadius(spots[i * 4 + 2]); const cx = clamp(((x[i] + w) / cs) | 0, 0, W - 1), cz = clamp(((z[i] + w) / cs) | 0, 0, W - 1); cell[i] = cz * W + cx; start[cell[i] + 1]++; }
+  for (let i = 0; i < W * W; i++) start[i + 1] += start[i];
+  const fill = start.slice(); for (let i = 0; i < n; i++) ids[fill[cell[i]]++] = i;
+  return { cs, w, W, x, z, r, start, ids, n };
+}
+/** Push (px,pz) out of any tree it overlaps. Returns [x, z] (shared array, copy if you keep it). */
+const _p = [0, 0];
+export function pushFromTrees(tg, px, pz, pad = 0) {
+  _p[0] = px; _p[1] = pz; if (!tg) return _p;
+  const cx = clamp(((px + tg.w) / tg.cs) | 0, 0, tg.W - 1), cz = clamp(((pz + tg.w) / tg.cs) | 0, 0, tg.W - 1);
+  for (let zz = Math.max(0, cz - 1); zz <= Math.min(tg.W - 1, cz + 1); zz++) for (let xx = Math.max(0, cx - 1); xx <= Math.min(tg.W - 1, cx + 1); xx++) {
+    const c = zz * tg.W + xx;
+    for (let k = tg.start[c], e = tg.start[c + 1]; k < e; k++) {
+      const t = tg.ids[k], R = tg.r[t] + pad, dx = _p[0] - tg.x[t], dz = _p[1] - tg.z[t], d2 = dx * dx + dz * dz;
+      if (d2 < R * R) { const d = Math.sqrt(d2) || 0.001, f = R / d; _p[0] = d2 ? tg.x[t] + dx * f : tg.x[t] + R; _p[1] = d2 ? tg.z[t] + dz * f : tg.z[t]; }
+    }
+  }
+  return _p;
 }

@@ -1,6 +1,6 @@
 // Headless battle simulation: spatial-hash combat for tens of thousands of spear soldiers.
 import { CLIP, CLIPS } from './clips.js';
-import { setTerrain, cellOf, heightAt } from './terrain.js';
+import { setTerrain, cellOf, heightAt, pushFromTrees } from './terrain.js';
 import { slots, FORMATIONS } from './formations.js';
 import { SiegeRules } from './siegerules.js';
 
@@ -259,6 +259,7 @@ export class Sim {
             const ex = x[i] - x[j], ez = z[i] - z[j], d2 = ex * ex + ez * ez;
             if (d2 < SEP * SEP && !(this.siege && Math.abs(this.elev[i] - this.elev[j]) > 1.5)) { const d = Math.sqrt(d2) || 0.001, push = (SEP - d) / SEP; sx += (ex / d) * push; sz += (ez / d) * push; if (d2 === 0) { sx += (i & 1) - 0.5; } } } } }
       x[i] += vx[i] * dt + sx * 0.32; z[i] += vz[i] * dt + sz * 0.32;
+      if (this.tr.tg) { const q = pushFromTrees(this.tr.tg, x[i], z[i], 0.05); x[i] = q[0]; z[i] = q[1]; }
       if (x[i] < -this.world + 5) x[i] = -this.world + 5; else if (x[i] > this.world - 5) x[i] = this.world - 5;
       if (z[i] < -this.world + 5) z[i] = -this.world + 5; else if (z[i] > this.world - 5) z[i] = this.world - 5;
       if (this.siege) this.siege.post(i, dt);

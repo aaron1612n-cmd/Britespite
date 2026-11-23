@@ -32,9 +32,14 @@ export class FlyCam {
   setCmd(on) { this.cmd = on; this.ptr.clear(); if (on && document.pointerLockElement) document.exitPointerLock(); }
   touch() { this.input = true; }
   stickMove(e, el, knob) { const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2; let x = (e.clientX - cx) / (r.width / 2), y = (e.clientY - cy) / (r.height / 2); const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; } this.stick.x = x; this.stick.y = y; knob.style.transform = `translate(${x * 38}px,${y * 38}px)`; this.touch(); }
-  look(dx, dy, k) { this.yaw -= dx * k; this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - dy * k)); this.touch(); }
+  look(dx, dy, k) { if (!Number.isFinite(dx) || !Number.isFinite(dy)) return; dx = Math.max(-400, Math.min(400, dx)); dy = Math.max(-400, Math.min(400, dy)); this.yaw -= dx * k; this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - dy * k)); this.touch(); }
   lookAt(px, py, pz, tx, ty, tz) { this.pos.set(px, py, pz); const dx = tx - px, dy = ty - py, dz = tz - pz; this.yaw = Math.atan2(-dx, -dz); this.pitch = Math.atan2(dy, Math.hypot(dx, dz)); this.apply(); }
-  apply() { this.cam.rotation.set(this.pitch, this.yaw, 0, 'YXZ'); }
+  /** A NaN anywhere in the camera paints every frame black, so never let one through. */
+  apply() {
+    const p = this.pos; if (!Number.isFinite(this.yaw)) this.yaw = this.okYaw || 0; if (!Number.isFinite(this.pitch)) this.pitch = this.okPitch || 0;
+    if (!Number.isFinite(p.x + p.y + p.z)) { p.copy(this.okPos || p.set(0, 30, 0)); this.vel.set(0, 0, 0); }
+    this.okYaw = this.yaw; this.okPitch = this.pitch; (this.okPos || (this.okPos = p.clone())).copy(p); this.cam.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+  }
   update(dt) {
     const k = this.keys, f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - this.stick.y;
     const s = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + this.stick.x;
@@ -43,7 +48,7 @@ export class FlyCam {
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw), cp = Math.cos(this.pitch), sp2 = Math.sin(this.pitch);
     const target = new THREE.Vector3(-sy * cp * f + cy * s, sp2 * f + u, -cy * cp * f - sy * s);
     if (target.lengthSq() > 1) target.normalize(); target.multiplyScalar(sp);
-    this.vel.lerp(target, 1 - Math.exp(-8 * dt)); this.pos.addScaledVector(this.vel, dt);
+    if (!(dt > 0)) dt = 0; this.vel.lerp(target, 1 - Math.exp(-8 * dt)); this.pos.addScaledVector(this.vel, dt);
     const gy = heightAt(this.pos.x, this.pos.z) + 1.6; if (this.pos.y < gy) { this.pos.y = gy; if (this.vel.y < 0) this.vel.y = 0; }
     if (this.pos.y > 1500) this.pos.y = 1500; this.apply();
   }
