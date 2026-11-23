@@ -48,7 +48,7 @@ async function start(n) {
   perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
   if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1 };
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
-  const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; G.worker = useWorker; battle = new Battlefield(scene, sim);
+  const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim);
   battle.setQuality(coarse ? 0.35 : 1); flags = new Standards(scene, sim, cols(), reduced); applyColors();
   G.sim = sim; G.battle = battle; if (sim.setSpeed) sim.setSpeed(speed); $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
@@ -70,7 +70,7 @@ function runSweep(dt) {
 const sel = $('size'); sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide;
 sel.addEventListener('change', () => start(+sel.value));
 const pauseBtn = $('pause'), muteBtn = $('mute');
-function setPaused(p) { G.paused = p; if (sim && sim.setPaused) sim.setPaused(p); pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
+function setPaused(p) { G.paused = p; audio.setPaused(p); if (sim && sim.setPaused) sim.setPaused(p); pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
 function setMuted(m) { audio.setMuted(m); muteBtn.setAttribute('aria-pressed', m); muteBtn.textContent = m ? 'Sound off' : 'Sound on'; }
 pauseBtn.onclick = () => setPaused(!G.paused); muteBtn.onclick = () => setMuted(!audio.muted); $('colA').onclick = () => cycle(0); $('colB').onclick = () => cycle(1);
 const panel = $('panel'), statsBtn = $('statsBtn'); let showStats = true;
@@ -95,7 +95,7 @@ addEventListener('keydown', (e) => {
 addEventListener('pointerdown', () => { if (!audio.ctx && !audio.muted) audio.start(); }, { once: false });
 
 // ---- loop
-let last = performance.now(), fAcc = 0, fN = 0, statT = 0;
+let ev = 0, last = performance.now(), fAcc = 0, fN = 0, statT = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000); last = now; G.frame++;
@@ -108,9 +108,11 @@ function frame(now) {
   if (fAcc > 0.5) { G.fps = fN / fAcc; fAcc = 0; fN = 0; adapt(); }
   if ((statT += dt) > 0.25) { statT = 0; hud(); }
   // audio
-  if (audio.ctx && !audio.muted) {
-    const hs = []; for (const h of sim.hitEvents) { const d = Math.hypot(h.x - camera.position.x, h.z - camera.position.z, camera.position.y); const v = Math.max(0, 1 - d / 160); if (v > 0.05) hs.push(v); }
-    audio.update(Math.min(1, battle.counts.near / 300 + 0.15), hs);
+  if (audio.ctx && !audio.muted && !G.paused) {
+    const hs = sim.hitEvents; ev = ev * 0.97 + hs.length * 0.03; // smoothed fight rate
+    if (hs.length && !audio.hornedStart) { audio.hornedStart = true; const f = sim.world * 0.1; audio.horn(-f, -90, camera, 0); audio.horn(f, 90, camera, 3); }
+    const w = sim.winner(); if (w >= 0 && !G.hornedEnd) { G.hornedEnd = true; audio.horn(0, w === 0 ? -80 : 80, camera, 7); }
+    audio.update(camera, hs, Math.min(1, battle.counts.near / 300 + 0.1), Math.min(1, ev / 10 + 0.1), dt);
   }
   if (tut < TUT.length && fly.input) { tutT += dt; if (tutT > 3.5) { tutT = 0; showTut(tut + 1); } }
 }
