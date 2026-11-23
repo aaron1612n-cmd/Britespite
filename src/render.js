@@ -235,7 +235,7 @@ export class Battlefield {
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(5000, 24, 12), m); this.sky.frustumCulled = false; this.scene.add(this.sky);
   }
   update(camera, alpha) {
-    const s = this.sim, n = s.n, dt = alpha * s.TICK, q = this.q; if (this.siege) this.siege.update();
+    const s = this.sim, n = s.n, dt = alpha * (s.stepDt || s.TICK), q = this.q; if (this.siege) this.siege.update();
     camera.updateMatrixWorld(); const e = camera.matrixWorld.elements;
     const cx = e[12], cy = e[13], cz = e[14], rx = e[0], ry = e[1], rz = e[2], ux = e[4], uy = e[5], uz = e[6], fx = -e[8], fy = -e[9], fz = -e[10];
     if (!Number.isFinite(cx + cy + cz + rx + ry + rz + ux + uy + uz + fx + fy + fz)) return; // never cull against a broken camera
