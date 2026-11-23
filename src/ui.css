@@ -37,7 +37,8 @@ button:disabled { opacity:.45; cursor:default; }
 .group { display:flex; border:1px solid var(--rule); background:var(--panel); }
 .group button { border:0; border-right:1px solid var(--rule); } .group button:last-child { border-right:0; }
 .group button[aria-pressed="true"] { border-color:var(--rule); }
-.setup { width:100%; background:var(--panel); border:1px solid var(--rule); border-top:3px solid var(--accent); padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px; max-height:calc(100vh - 80px); overflow:auto; touch-action:pan-y; }
+.setup { width:100%; background:var(--panel); border:1px solid var(--rule); border-top:3px solid var(--accent); padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px; max-height:calc(100vh - 140px); max-height:calc(100dvh - 140px); overflow:auto; overscroll-behavior:contain; touch-action:pan-y; }
+.bar { z-index:6; }
 .setup[hidden] { display:none; }
 .setup fieldset { border:0; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .setup legend { font:700 14px var(--display); color:var(--accent); padding:0; margin-bottom:0; grid-column:1/-1; }
@@ -69,7 +70,7 @@ button:disabled { opacity:.45; cursor:default; }
   .bar { top:auto; bottom:max(10px,env(safe-area-inset-bottom)); right:12px; left:12px; max-width:none; gap:0; border:1px solid var(--rule); background:var(--panel); }
   .bar .group { display:contents; }
   .bar button { flex:1 1 25%; padding:0 4px; border:0; border-right:1px solid var(--rule); border-bottom:1px solid var(--rule); }
-  .setup { position:fixed; z-index:5; inset:8px 8px auto 8px; width:auto; max-height:calc(100vh - 16px); }
+  .setup { position:fixed; z-index:5; left:8px; right:8px; top:8px; bottom:calc(max(10px,env(safe-area-inset-bottom)) + 100px); width:auto; max-height:none; }
   .side { min-width:84px; } .stats { display:none; }
 }
 @media (max-width:640px) and (pointer:coarse) { .stick, .pad { bottom:calc(max(10px,env(safe-area-inset-bottom)) + 110px); } .hint { bottom:260px; } .cmd { bottom:270px; } }
