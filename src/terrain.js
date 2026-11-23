@@ -57,6 +57,14 @@ export function heightAt(x, z) {
   const i = gx | 0, j = gz | 0, fx = gx - i, fz = gz - j, p = j * t.W + i, H = t.H;
   return mix(mix(H[p], H[p + 1], fx), mix(H[p + t.W], H[p + t.W + 1], fx), fz);
 }
+/** Nearest-cell height: no interpolation. For distant soldiers where a 1 m grid step cannot be seen. */
+export function heightAtFast(x, z) {
+  if (ground.flat) return 0;
+  const t = cache; if (!t) return base(x, z);
+  const i = (x + t.world) | 0, j = (z + t.world) | 0;
+  if (x + t.world < 0 || z + t.world < 0 || i >= t.W || j >= t.W) return analyticHeight(x, z);
+  return t.H[j * t.W + i];
+}
 export const analyticHeightAt = (x, z) => analyticHeight(x, z);
 
 /** Deterministic tree positions [x,z,scale,rot]* for the forest preset. */

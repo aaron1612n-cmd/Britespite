@@ -4,7 +4,7 @@ import { buildSoldier } from './model.js';
 import { bakeAll } from './rig.js';
 import { NB } from './skeleton.js';
 import { CLIPS, CLIP } from './clips.js';
-import { ground, heightAt, analyticHeightAt, setTerrain, forestAt, waterKind, treeSpots, TREE_CAP, WATER_Y, RIVER_HALF } from './terrain.js';
+import { ground, heightAt, heightAtFast, analyticHeightAt, setTerrain, forestAt, waterKind, treeSpots, TREE_CAP, WATER_Y, RIVER_HALF } from './terrain.js';
 import { Atmosphere, FOG_BASE } from './atmosphere.js';
 import { ST } from './sim.js';
 import { SiegeScene } from './siegescene.js';
@@ -253,8 +253,8 @@ export class Battlefield {
       if (depth < -3) { cull++; continue; }
       const lim = depth * tx + 3, lx = dx * rx + dy * ry + dz * rz; if (lx > lim || lx < -lim) { cull++; continue; }
       const ly = dx * ux + dy * uy + dz * uz, limy = depth * ty + 3; if (ly > limy || ly < -limy) { cull++; continue; }
-      const d2 = dx * dx + dz * dz + dy * dy, y = heightAt(px, pz) + elev[i], ut = utype[i];
-      const cl = CLIPS[clip[i]]; let t = animT[i] + (cl.speed ? dt * Math.min(1.8, Math.max(0.4, Math.hypot(vx[i], vz[i]) / cl.speed)) : dt);
+      const d2 = dx * dx + dz * dz + dy * dy, y = (d2 < mr2 * 2.4 ? heightAt(px, pz) : heightAtFast(px, pz)) + elev[i], ut = utype[i];
+      const cl = CLIPS[clip[i]]; let t = animT[i] + (cl.speed ? dt * Math.min(1.8, Math.max(0.4, Math.sqrt(vx[i] * vx[i] + vz[i] * vz[i]) / cl.speed)) : dt);
       if (cl.loop) { if (t > cl.dur) t -= cl.dur; } else if (t > cl.dur) t = cl.dur;
       const k = this.jit[i], lo = lod[i], kn = k * k * (lo === 0 ? 1.3 : 1), km = k * k * (lo <= 1 ? 1.3 : 1);
       if (d2 < 1.2 && Math.abs(dy) < 1.5) { cull++; continue; } // camera inside a soldier: skip it instead of filling the view
