@@ -4,7 +4,7 @@ import { setTerrain, cellOf } from './terrain.js';
 import { slots, FORMATIONS } from './formations.js';
 
 export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
-const MR = 2, ROUT_AT = 0.16, RALLY_AT = 0.5, CELL = 2, REACH = 2.3, SEP = 0.9, AGGRO = 26, TICK = 0.05;
+const CELL = 2, REACH = 2.3, SEP = 0.9, AGGRO = 26, TICK = 0.05;
 export const ORD = { NONE: 0, ADVANCE: 1, HOLD: 2, FLANK: 3 };
 const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CLIPS[CLIP.ATTACK].hit;
 
@@ -29,8 +29,6 @@ export class Sim {
     this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n);
     this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0]; this.over = -1; // over: -1 running, else winning team
-    // morale (sim-internal, not shared): 1 = steady, below ROUT_AT the unit breaks and runs
-    this.morale = new Float32Array(n).fill(1); this.rout = new Uint8Array(n); this.fled = [0, 0]; this.routing = [0, 0];
     this.layout(spacing, gap);
   }
   layout(spacing, gap) {
@@ -55,7 +53,7 @@ export class Sim {
     for (let i = 0; i < n; i++) {
       if (this.removed[i] || this.state[i] === ST.DEAD) { this.cellOf[i] = -1; continue; }
       const ci = this.cellIdx(this.x[i], this.z[i]); this.cellOf[i] = ci; cs[ci + 1]++;
-      const tm = this.team[i]; if (!this.rout[i]) { sx[tm] += this.x[i]; sz[tm] += this.z[i]; cn[tm]++; }
+      const tm = this.team[i]; sx[tm] += this.x[i]; sz[tm] += this.z[i]; cn[tm]++;
       if (this.team[i] === 0) { if (this.z[i] > f0) f0 = this.z[i]; } else if (this.z[i] < f1) f1 = this.z[i];
     }
     this.frontZ[0] = f0; this.frontZ[1] = f1; for (let t = 0; t < 2; t++) if (cn[t]) { this.cenX[t] = sx[t] / cn[t]; this.cenZ[t] = sz[t] / cn[t]; }
@@ -85,37 +83,6 @@ export class Sim {
     }
     return best;
   }
-  /** a death shakes friends within a few metres (further for the dead's own side) */
-  shock(j) {
-    const c = this.cells, ci = this.cellOf[j]; if (ci < 0) return; const cx = ci % c, cz = (ci / c) | 0, me = this.team[j], px = this.x[j], pz = this.z[j];
-    for (let zz = Math.max(0, cz - MR); zz <= Math.min(c - 1, cz + MR); zz++) for (let xx = Math.max(0, cx - MR); xx <= Math.min(c - 1, cx + MR); xx++) {
-      const cc = zz * c + xx;
-      for (let k = this.cellStart[cc], e = this.cellStart[cc + 1]; k < e; k++) { const f = this.order[k]; if (this.team[f] !== me || f === j) continue;
-        const d2 = (this.x[f] - px) ** 2 + (this.z[f] - pz) ** 2; if (d2 < 36) this.morale[f] -= 0.05 * (1 - d2 / 36) * (1.3 - this.seed[f] * 0.5); }
-    }
-  }
-  /** local odds: outnumbered, flanked, friends routing/dying, and how bruised the whole army is */
-  moraleCheck(i, dt) {
-    const c = this.cells, ci = this.cellOf[i], cx = ci % c, cz = (ci / c) | 0, me = this.team[i], px = this.x[i], pz = this.z[i], dir = me === 0 ? 1 : -1;
-    let F = 1, E = 0, rear = 0, panic = 0;
-    for (let zz = Math.max(0, cz - MR); zz <= Math.min(c - 1, cz + MR); zz++) for (let xx = Math.max(0, cx - MR); xx <= Math.min(c - 1, cx + MR); xx++) {
-      const cc = zz * c + xx;
-      for (let k = this.cellStart[cc], e = this.cellStart[cc + 1]; k < e; k++) { const j = this.order[k]; if (j === i) continue;
-        const ex = this.x[j] - px, ez = this.z[j] - pz, d2 = ex * ex + ez * ez; if (d2 > 36) continue;
-        if (this.team[j] === me) { if (this.rout[j]) panic++; else F++; }
-        else if (this.state[j] !== ST.DEAD && !this.rout[j]) { E++; if (ez * dir < 0 && d2 < 16 && -ez * dir > 0.6 * Math.sqrt(d2)) rear++; } }
-    }
-    const lost = Math.max(0, this.deaths[me] + this.fled[me] - 0.3 * this.perSide) / this.perSide; // army-level wear
-    let p = 0;
-    if (E > 0) { const ratio = (E + 0.3) / F; if (ratio > 1.5) p += (ratio - 1.5) * 0.22; if (rear) p += 0.12 * Math.min(rear, 4); p += lost * 0.8; }
-    if (E > 0 || panic > 3) p += Math.min(panic, 6) * 0.012;
-    const courage = 0.75 + this.seed[i] * 0.5;
-    if (p > 0) this.morale[i] -= (p / courage) * dt;
-    else if (E === 0 || (E + 0.3) / F < 0.8) this.morale[i] += (this.rout[i] ? 0.07 : 0.05) * dt * (E === 0 ? 1.5 : 0.3);
-    if (this.morale[i] > 1) this.morale[i] = 1;
-    if (!this.rout[i] && this.morale[i] < ROUT_AT) { this.rout[i] = 1; this.routing[me]++; }
-    else if (this.rout[i] && this.morale[i] > RALLY_AT) { this.rout[i] = 0; this.routing[me]--; }
-  }
   setClip(i, c, startT = 0) {
     if (this.clip[i] === c) return;
     this.prevClip[i] = this.clip[i]; this.prevT[i] = this.animT[i]; this.blend[i] = 0; this.clip[i] = c; this.animT[i] = startT;
@@ -126,7 +93,7 @@ export class Sim {
     if (this.hp[j] <= 0) {
       this.state[j] = ST.DEAD; this.stateT[j] = 0; this.vx[j] = this.vz[j] = 0;
       this.setClip(j, this.seed[j] < 0.5 ? CLIP.DIE_BACK : CLIP.DIE_FWD, 0);
-      this.alive[this.team[j]]--; this.deaths[this.team[j]]++; this.deadQ.push(j); if (this.rout[j]) { this.rout[j] = 0; this.routing[this.team[j]]--; } this.shock(j);
+      this.alive[this.team[j]]--; this.deaths[this.team[j]]++; this.deadQ.push(j);
     } else if (this.state[j] !== ST.ATTACK) {
       this.state[j] = ST.HIT; this.stateT[j] = 0; this.setClip(j, CLIP.HIT, 0);
       const dx = this.x[j] - this.x[from], dz = this.z[j] - this.z[from], l = Math.hypot(dx, dz) || 1; this.vx[j] = (dx / l) * 1.5; this.vz[j] = (dz / l) * 1.5;
@@ -153,7 +120,7 @@ export class Sim {
     const { x, z, vx, vz, yaw, team, state, stateT, cd, tgt, spd, clip } = this;
     for (let i = 0; i < n; i++) {
       const st = state[i]; if (st === ST.DEAD || st === ST.CHEER || this.removed[i]) continue;
-      stateT[i] += dt; cd[i] -= dt; if (((this.tickCount + i) & 3) === 0 && st !== ST.HIT) this.moraleCheck(i, dt * 4); const me = team[i], dir = me === 0 ? 1 : -1;
+      stateT[i] += dt; cd[i] -= dt; const me = team[i], dir = me === 0 ? 1 : -1;
       let desX = 0, desZ = 0, sp = 0;
       if (st === ST.ATTACK) {
         const j = tgt[i];
@@ -165,15 +132,6 @@ export class Sim {
         if (stateT[i] >= D_ATTACK) { state[i] = ST.MOVE; cd[i] = 0.4 + this.rand() * 0.5; }
       } else if (st === ST.HIT) {
         if (stateT[i] >= D_HIT) { state[i] = ST.MOVE; }
-      } else if (this.rout[i]) {
-        // broken: sprint for the rear, bending away from whoever is nearest; leave the field at the back edge
-        const j = tgt[i]; let ax = 0;
-        if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[i] - x[j]; ax = ex > 0 ? 0.5 : -0.5; }
-        desX = ax; desZ = -dir; const l = Math.hypot(desX, desZ); desX /= l; desZ /= l; sp = 3.7 * spd[i];
-        this.turn(i, Math.atan2(desX, desZ), dt, 9);
-        const a = Math.min(1, 6 * dt); vx[i] += (desX * sp - vx[i]) * a; vz[i] += (desZ * sp - vz[i]) * a;
-        if (-z[i] * dir > this.world - 12 && this.morale[i] < RALLY_AT) { this.removed[i] = 1; this.rout[i] = 0; this.routing[me]--; this.alive[me]--; this.fled[me]++; continue; }
-        if (((this.tickCount + i) & 7) === 0) tgt[i] = this.nearestEnemy(i);
       } else {
         let j = tgt[i];
         if (j < 0 || state[j] === ST.DEAD || ((this.tickCount + i) & 7) === 0) {

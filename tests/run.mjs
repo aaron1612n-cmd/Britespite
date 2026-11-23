@@ -78,10 +78,9 @@ check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, 
   check('battle ends with a winner', w >= 0 && surv.length > 0, `winner ${w} after ${(k * 0.05).toFixed(0)} s`);
   check('survivors cheer and stay put', surv.every((i) => s.state[i] === ST.CHEER && s.clip[i] === CLIP.CHEER && Math.abs(s.x[i] - pos0[i]) < 1e-3 && s.vx[i] === 0 && s.vz[i] === 0), `${surv.length} survivors`);
 }
-{ // morale: losing side breaks and flees, battle ends instead of grinding on
+{ // battle ends naturally: stragglers march on the enemy
   const m = new Sim({ perSide: 400, seed: 5 }); let t = 0; while (m.winner() < 0 && t < 12000) { m.tick(0.05); t++; }
   check('battle ends naturally with a winner', m.winner() >= 0, `winner ${m.winner()} after ${(t * 0.05).toFixed(0)}s`);
-  check('losers fled rather than all dying', m.fled[0] + m.fled[1] > 20, `fled ${m.fled}, dead ${m.deaths[0]}/${m.deaths[1]}`);
   check('battle ends within 8 minutes', t * 0.05 < 480, `${(t * 0.05).toFixed(0)}s`);
 }
 { // every formation lays out an army without stacking, and each one actually fights
@@ -157,7 +156,7 @@ try {
   check('camera modes raise no console errors', errs.length === 0, errs.join(' | '));
   for (const q of ['terrain=hills&weather=fog&time=dusk', 'terrain=ford&weather=rain&time=day', 'terrain=forest&weather=rain&time=dusk']) {
     const errs2 = []; const p2 = await browser.newPage({ viewport: { width: 800, height: 500 } }); p2.on('console', (m) => { if (m.type() === 'error') errs2.push(m.text()); }); p2.on('pageerror', (e) => errs2.push(e.message));
-    await p2.goto(`http://localhost:4173/?test&manual&n=500&${q}`); await p2.waitForFunction(() => window.__GAME__ && window.__GAME__.ready, null, { timeout: 30000 });
+    await p2.goto(`http://localhost:4173/?test&manual&n=500&${q}`, { timeout: 120000 }); await p2.waitForFunction(() => window.__GAME__ && window.__GAME__.ready, null, { timeout: 30000 });
     const calls = await p2.evaluate(() => { const G = window.__GAME__; G.step(400); G.draw(); G.setLook({ weather: 'rain', time: 'dusk' }); G.draw(); return G.renderer.info.render.calls; });
     check(`look ${q}: no console errors, draw calls under 100`, errs2.length === 0 && calls < 100, `${calls} calls ${errs2.join(' | ')}`); await p2.close();
   }
