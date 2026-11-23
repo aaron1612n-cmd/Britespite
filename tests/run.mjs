@@ -256,6 +256,16 @@ try {
     check('siege battle ran in browser', q.gate < 1400 && q.alive[0] <= 500, `gate ${q.gate | 0}, alive ${q.alive}`);
     await sp.close();
   }
+  { // the real boot path: cross-origin isolated, sim in a Worker over SharedArrayBuffers (test mode skips it, which once shipped a blank world)
+    const wp = await browser.newPage({ viewport: { width: 800, height: 500 } }); const e3 = []; wp.on('console', (m) => { if (m.type() === 'error') e3.push(m.text()); }); wp.on('pageerror', (e) => e3.push(e.message));
+    await wp.goto('http://localhost:4173/?n=500'); await wp.waitForFunction(() => window.__GAME__ && window.__GAME__.battle && window.__GAME__.frame > 20, null, { timeout: 60000 });
+    const w = await wp.evaluate(() => { const G = window.__GAME__, gl = G.renderer.getContext(); G.draw(); const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, seen = new Set(); const px = new Uint8Array(4);
+      for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) { gl.readPixels(Math.floor(((x + 0.5) / 20) * W), Math.floor(((y + 0.5) / 20) * H), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); seen.add((px[0] >> 4) * 256 + (px[1] >> 4) * 16 + (px[2] >> 4)); }
+      const c = G.battle.counts; return { worker: G.worker, drawn: c.near + c.mid + c.far, colours: seen.size, errors: G.errors.length, utype: G.sim.utype.length === G.sim.n }; });
+    check('worker boot: no console errors, no thrown frames', e3.length === 0 && w.errors === 0 && w.worker === true, `${e3.join(' | ')} errors ${w.errors} worker ${w.worker}`);
+    check('worker boot: soldiers are drawn and the canvas is not blank', w.drawn > 0 && w.utype && w.colours > 6, `${w.drawn} drawn, ${w.colours} distinct colours`);
+    await wp.close();
+  }
   const ff = await page.evaluate(() => { const b = document.getElementById('ff'); b.click(); const a = b.textContent; b.click(); b.click(); b.click(); return [a, b.textContent]; });
   check('fast-forward button cycles 1x/2x/4x/8x', ff[0] === '2×' && ff[1] === '1×', ff.join(' -> '));
   const cam = await page.evaluate(async () => {
