@@ -6,6 +6,7 @@ import { bakeAll, skinVertices } from '../src/rig.js';
 import { NB, BONES } from '../src/skeleton.js';
 import { CLIPS, CLIP } from '../src/clips.js';
 import { Sim, ST, ORD } from '../src/sim.js';
+import { cellOf } from '../src/terrain.js';
 
 let fails = 0, passes = 0;
 const check = (name, ok, info = '') => { ok ? passes++ : fails++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  ' + info : ''}`); };
@@ -88,6 +89,22 @@ check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, 
   const ms = (performance.now() - t) / 400; check('sim tick under 18 ms for 20,000 soldiers', ms < 18, `${ms.toFixed(1)} ms/tick (20 ticks/s, runs in a worker)`);
 }
 
+// ---------- terrain ----------
+for (const id of ['hills', 'ford', 'forest']) {
+  const a = new Sim({ perSide: 400, seed: 5, terrain: id }), b = new Sim({ perSide: 400, seed: 5, terrain: id });
+  for (let i = 0; i < 1600; i++) { a.tick(0.05); b.tick(0.05); }
+  check(`${id}: deterministic, finite, both sides fight`, a.hash() === b.hash() && [...a.x, ...a.z].every(Number.isFinite) && a.deaths[0] > 0 && a.deaths[1] > 0, `deaths ${a.deaths[0]}/${a.deaths[1]}`);
+}
+{
+  const s = new Sim({ perSide: 400, seed: 1, terrain: 'ford' }), tr = s.tr; let deepStarts = 0;
+  for (let i = 0; i < s.n; i++) if (tr.K[cellOf(tr, s.x[i], s.z[i])]) deepStarts++;
+  check('ford: nobody starts in the water', deepStarts === 0);
+  check('ford: crossing is wadeable, rest of the river is deep', tr.K[cellOf(tr, 0, 0)] === 1 && tr.K[cellOf(tr, tr.world * 0.5, 0)] === 2, `centre ${tr.K[cellOf(tr, 0, 0)]}, flank ${tr.K[cellOf(tr, tr.world * 0.5, 0)]}`);
+  const h = new Sim({ perSide: 400, seed: 1, terrain: 'hills' }); const w = h.world;
+  const up = h.moveMul ? (() => { h.x[0] = -0.2 * w - 40; h.z[0] = -10; return h.moveMul(0, 1, 0); })() : 1;
+  check('hills: walking uphill is slower than downhill', up < 0.95 && (() => { h.x[0] = -0.2 * w + 40; return h.moveMul(0, 1, 0); })() > up, `uphill ${up.toFixed(2)}`);
+  check('flat stays the default with no terrain effects', new Sim({ perSide: 10 }).tr.fx === false);
+}
 // ---------- browser smoke ----------
 let pw; try { pw = await import('playwright'); } catch { pw = await import('/opt/node-tools/node_modules/playwright/index.mjs'); }
 execSync('npx vite build', { stdio: 'ignore' });
@@ -128,9 +145,16 @@ try {
   check('cinematic camera finds the fight', cam.cine);
   check('replay plays recorded frames and exits cleanly', cam.replay && cam.replayFinite && cam.free && cam.camFinite);
   check('camera modes raise no console errors', errs.length === 0, errs.join(' | '));
+  for (const q of ['terrain=hills&weather=fog&time=dusk', 'terrain=ford&weather=rain&time=day', 'terrain=forest&weather=rain&time=dusk']) {
+    const errs2 = []; const p2 = await browser.newPage({ viewport: { width: 800, height: 500 } }); p2.on('console', (m) => { if (m.type() === 'error') errs2.push(m.text()); }); p2.on('pageerror', (e) => errs2.push(e.message));
+    await p2.goto(`http://localhost:4173/?test&manual&n=500&${q}`); await p2.waitForFunction(() => window.__GAME__ && window.__GAME__.ready, null, { timeout: 30000 });
+    const calls = await p2.evaluate(() => { const G = window.__GAME__; G.step(400); G.draw(); G.setLook({ weather: 'rain', time: 'dusk' }); G.draw(); return G.renderer.info.render.calls; });
+    check(`look ${q}: no console errors, draw calls under 100`, errs2.length === 0 && calls < 100, `${calls} calls ${errs2.join(' | ')}`); await p2.close();
+  }
   const t0 = await page.evaluate(() => { const G = window.__GAME__, a = performance.now(); for (let i = 0; i < 10; i++) G.draw(); return (performance.now() - a) / 10; });
   console.log(`INFO  software-GL frame cost ${t0.toFixed(0)} ms (CPU submit only, headless software GL; real FPS needs a GPU)`);
-} finally { await browser.close(); srv.kill(); }{ // commander orders
+} finally { await browser.close(); srv.kill(); }
+{ // commander orders
   const mk = () => new Sim({ perSide: 400, seed: 3 }), ids = (s) => Array.from({ length: 100 }, (_, i) => i);
   const a = mk(); const ids0 = ids(a); const cz0 = ids0.reduce((q, i) => q + a.z[i], 0) / 100;
   a.command(ids0, ORD.ADVANCE, 0, cz0 + 40); for (let k = 0; k < 400; k++) a.tick(a.TICK);

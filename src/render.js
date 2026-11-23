@@ -4,11 +4,12 @@ import { buildSoldier } from './model.js';
 import { bakeAll } from './rig.js';
 import { NB } from './skeleton.js';
 import { CLIPS, CLIP } from './clips.js';
-import { heightAt } from './terrain.js';
+import { heightAt, analyticHeightAt, setTerrain, forestAt, waterKind, treeSpots, WATER_Y, RIVER_HALF } from './terrain.js';
+import { Atmosphere, FOG_BASE } from './atmosphere.js';
 import { ST } from './sim.js';
 
 const col = (hex) => new THREE.Color(hex);
-const FOG = 0.0009;
+const FOG = FOG_BASE;
 
 const COMMON_VS = /* glsl */`
 precision highp float; precision highp sampler2D;
@@ -54,7 +55,7 @@ void main() {
 }`;
 const COMMON_FS = /* glsl */`
 precision highp float;
-uniform vec3 uPal[9]; uniform vec3 uTeam[4]; uniform vec3 uSun; uniform vec3 uFog; uniform float uFogD;
+uniform vec3 uPal[9]; uniform vec3 uTeam[4]; uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uAmbS; uniform vec3 uAmbG; uniform vec3 uFog; uniform float uFogD;
 varying vec3 vN; varying float vMat; varying float vSeed; varying float vTeam; varying float vLY; varying float vDepth;
 void main() {
   int m = int(vMat + 0.5); vec3 base = uPal[m];
@@ -64,9 +65,9 @@ void main() {
   base *= v;
   vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
   float d = max(dot(n, uSun), 0.0);
-  vec3 amb = mix(vec3(0.32, 0.30, 0.26), vec3(0.50, 0.58, 0.68), n.y * 0.5 + 0.5);
+  vec3 amb = mix(uAmbG, uAmbS, n.y * 0.5 + 0.5);
   float ao = mix(0.62, 1.0, smoothstep(0.0, 0.9, vLY));
-  vec3 c = base * (amb * ao + vec3(1.0, 0.94, 0.82) * d * 0.85);
+  vec3 c = base * (amb * ao + uSunCol * d);
   float f = 1.0 - exp(-uFogD * uFogD * vDepth * vDepth); c = mix(c, uFog, f);
   gl_FragColor = vec4(c, 1.0);
 }`;
@@ -82,7 +83,7 @@ void main() {
 }`;
 const IMP_FS = /* glsl */`
 precision highp float;
-uniform vec3 uTeam[4]; uniform vec3 uFog; uniform float uFogD; uniform vec3 uSkin;
+uniform vec3 uTeam[4]; uniform vec3 uFog; uniform float uFogD; uniform vec3 uSkin; uniform vec3 uTone;
 varying vec2 vUv; varying float vTeam; varying float vDead; varying float vSeed; varying float vDepth;
 float seg(vec2 p, vec2 a, vec2 b, float r) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) - r; }
 void main() {
@@ -99,7 +100,7 @@ void main() {
     c = tun;
     if (head < 0.0) c = vec3(0.62, 0.45, 0.2); else if (legs < 0.0 && body > 0.0) c = uSkin * 0.8; else if (spear < 0.0 && body > 0.0) c = vec3(0.4, 0.3, 0.2);
   }
-  c *= 0.72 + 0.4 * fract(vSeed * 91.7);
+  c *= (0.72 + 0.4 * fract(vSeed * 91.7)) * uTone;
   float f = 1.0 - exp(-uFogD * uFogD * vDepth * vDepth); c = mix(c, uFog, f);
   gl_FragColor = vec4(c, 1.0);
 }`;
@@ -112,8 +113,8 @@ function instanced(src, max, withC) {
 }
 
 export class Battlefield {
-  constructor(scene, sim) {
-    this.scene = scene; this.sim = sim; const n = sim.n;
+  constructor(scene, sim, look = {}) {
+    this.scene = scene; this.look = look; this.sim = sim; const n = sim.n;
     const full = buildSoldier(0), mid = buildSoldier(1);
     const bake = bakeAll(full); this.bake = bake;
     const tex = new THREE.DataTexture(bake.data, NB * 3, bake.totalFrames, THREE.RGBAFormat, THREE.FloatType);
@@ -122,7 +123,8 @@ export class Battlefield {
     const pal = [THEME.skin, THEME.skin, THEME.bronze, THEME.wood, THEME.leather, THEME.skin, '#1b1410', '#2b1d14', '#8a6a45'].map(col);
     const teamCols = [col(THEME.teamA), col(THEME.teamA).multiplyScalar(0.8), col(THEME.teamB), col(THEME.teamB).multiplyScalar(0.8)];
     const fog = col(THEME.haze), sun = new THREE.Vector3(0.45, 0.8, 0.35).normalize();
-    this.uniforms = { uBones: { value: tex }, uClips: { value: clipU }, uPal: { value: pal }, uTeam: { value: teamCols }, uSun: { value: sun }, uFog: { value: fog }, uFogD: { value: FOG }, uRight: { value: new THREE.Vector3(1, 0, 0) }, uSkin: { value: col(THEME.skin) } };
+    this.uniforms = { uBones: { value: tex }, uClips: { value: clipU }, uPal: { value: pal }, uTeam: { value: teamCols }, uSun: { value: sun }, uFog: { value: fog }, uFogD: { value: FOG }, uRight: { value: new THREE.Vector3(1, 0, 0) }, uSkin: { value: col(THEME.skin) },
+      uSunCol: { value: new THREE.Vector3(0.85, 0.8, 0.7) }, uAmbS: { value: new THREE.Vector3(0.5, 0.58, 0.68) }, uAmbG: { value: new THREE.Vector3(0.32, 0.3, 0.26) }, uTone: { value: new THREE.Vector3(1, 1, 1) } };
     const mkMat = (defs) => new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: COMMON_VS, fragmentShader: COMMON_FS, defines: defs, side: THREE.DoubleSide });
     this.near = instanced(full, n, true); this.mid = instanced(mid, n, false);
     this.meshNear = new THREE.Mesh(this.near.g, mkMat({ SMOOTH: 1, TWOBONE: 1, BLEND: 1 }));
@@ -136,30 +138,70 @@ export class Battlefield {
     for (const m of [this.meshNear, this.meshMid, this.meshFar]) { m.frustumCulled = false; scene.add(m); }
     this.q = { nearR: 26, midR: 100, nearCap: 900, midCap: 5000 };
     this.counts = { near: 0, mid: 0, far: 0, culled: 0 };
-    this.buildTerrain(sim.world); this.buildSky();
+    setTerrain(look.terrain || 'flat', sim.world);
+    this.buildTerrain(sim.world); this.buildSky(); this.buildWater(); this.buildTrees(look.coarse ? 500 : 1500);
     scene.fog = new THREE.FogExp2(THEME.haze, FOG);
-    const hemi = new THREE.HemisphereLight(0xcfe0f0, 0x6a6a4a, 1.0); scene.add(hemi);
-    const dl = new THREE.DirectionalLight(0xfff0d8, 2.2); dl.position.copy(sun).multiplyScalar(100); scene.add(dl);
+    this.hemi = new THREE.HemisphereLight(0xcfe0f0, 0x6a6a4a, 1.0); scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.2); this.sun.position.copy(sun).multiplyScalar(100); scene.add(this.sun);
+    this.atmo = new Atmosphere(this, look);
+  }
+  setLook(time, weather) { this.atmo.set(time, weather); }
+  dispose() {
+    for (const m of [this.meshNear, this.meshMid, this.meshFar, this.terrain, this.outer, this.sky, this.water, this.trunks, this.crowns]) if (m) { this.scene.remove(m); m.geometry.dispose(); if (m.material.map) m.material.map.dispose(); m.material.dispose(); }
+    this.atmo.dispose(); this.uniforms.uBones.value.dispose();
   }
   buildTerrain(world) {
-    const size = world * 2 + 3000, seg = 220, g = new THREE.PlaneGeometry(size, size, seg, seg); g.rotateX(-Math.PI / 2);
-    const p = g.attributes.position, colors = new Float32Array(p.count * 3), a = col(THEME.grassA), b = col(THEME.grassB), c = new THREE.Color();
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), z = p.getZ(i); p.setY(i, heightAt(x, z));
-      const t = 0.5 + 0.5 * Math.sin(x * 0.011) * Math.sin(z * 0.013 + 1) + 0.15 * Math.sin(x * 0.07 + z * 0.05); c.copy(a).lerp(b, Math.min(1, Math.max(0, t))); colors.set([c.r, c.g, c.b], i * 3);
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(colors, 3)); g.computeVertexNormals();
+    const ga = col(THEME.grassA), gb = col(THEME.grassB), c = new THREE.Color(), dry = col('#8f8a55'), floor = col('#4d5a30'), sand = col('#b0a27a'), silt = col('#6d6a55');
     const cv = document.createElement('canvas'); cv.width = cv.height = 256; const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, 256, 256);
     let s = 7; const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-    for (let i = 0; i < 5000; i++) { const v = 200 + (r() * 55) | 0, dk = r() < 0.5; cx.fillStyle = dk ? `rgba(60,70,30,${0.08 + r() * 0.1})` : `rgba(255,255,220,${0.05 + r() * 0.1})`; cx.fillRect(r() * 256, r() * 256, 1 + r() * 2, 2 + r() * 4); }
-    const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(size / 6, size / 6); t.anisotropy = 4; t.colorSpace = THREE.SRGBColorSpace;
-    this.terrain = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, map: t })); this.scene.add(this.terrain);
+    for (let i = 0; i < 5000; i++) { const dk = r() < 0.5; cx.fillStyle = dk ? `rgba(60,70,30,${0.08 + r() * 0.1})` : `rgba(255,255,220,${0.05 + r() * 0.1})`; cx.fillRect(r() * 256, r() * 256, 1 + r() * 2, 2 + r() * 4); }
+    const tex = new THREE.CanvasTexture(cv); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.anisotropy = 4; tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: tex });
+    const build = (size, seg, hole) => {
+      const g = new THREE.PlaneGeometry(size, size, seg, seg); g.rotateX(-Math.PI / 2);
+      const p = g.attributes.position, colors = new Float32Array(p.count * 3), uv = g.attributes.uv;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), z = p.getZ(i), h = hole ? analyticHeightAt(x, z) - 0.5 : heightAt(x, z); p.setY(i, h);
+        const t = 0.5 + 0.5 * Math.sin(x * 0.011) * Math.sin(z * 0.013 + 1) + 0.15 * Math.sin(x * 0.07 + z * 0.05); c.copy(ga).lerp(gb, Math.min(1, Math.max(0, t)));
+        if (h > 3) c.lerp(dry, Math.min(0.55, (h - 3) * 0.06)); const f = forestAt(x, z); if (f > 0) c.lerp(floor, f * 0.7);
+        const wk = waterKind(h + (hole ? 0.5 : 0)); if (wk) c.lerp(wk === 2 ? silt : sand, 0.85); else if (h < 0.25 && Math.abs(z) < RIVER_HALF + 10 && this.look.terrain === 'ford') c.lerp(sand, 0.45);
+        colors.set([c.r, c.g, c.b], i * 3); uv.setXY(i, uv.getX(i) * size / 6, uv.getY(i) * size / 6);
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3)); g.computeVertexNormals();
+      if (hole) { // drop the cells fully covered by the detailed centre patch
+        const idx = g.index.array, keep = [], half = hole - size / seg;
+        for (let i = 0; i < idx.length; i += 3) { let inside = true; for (let k = 0; k < 3; k++) { const v = idx[i + k]; if (Math.abs(p.getX(v)) > half || Math.abs(p.getZ(v)) > half) inside = false; } if (!inside) keep.push(idx[i], idx[i + 1], idx[i + 2]); }
+        g.setIndex(keep);
+      }
+      return new THREE.Mesh(g, mat);
+    };
+    const half = world + 40; this.terrain = build(half * 2, Math.min(480, Math.ceil((half * 2) / 2.5)), 0); this.outer = build(world * 2 + 3000, 150, half);
+    this.outer.material = mat.clone(); this.outer.material.map = tex.clone(); this.outer.material.map.needsUpdate = true; this.scene.add(this.terrain, this.outer);
+  }
+  buildWater() {
+    if (this.look.terrain !== 'ford') return;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(6000, RIVER_HALF * 2 + 2), new THREE.MeshLambertMaterial({ color: '#4c7a86', transparent: true, opacity: 0.74, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.y = WATER_Y; this.water = m; this.scene.add(m);
+  }
+  buildTrees(cap) {
+    const spots = treeSpots(cap), n = spots.length / 4; if (!n) return;
+    const trunk = new THREE.CylinderGeometry(0.22, 0.32, 2.2, 5); trunk.translate(0, 1.1, 0);
+    const crown = new THREE.ConeGeometry(1.7, 6, 7); crown.translate(0, 4.6, 0);
+    const mk = (g, color) => { const m = new THREE.InstancedMesh(g, new THREE.MeshLambertMaterial({ color: '#fff' }), n); m.frustumCulled = false; m.userData.c = col(color); return m; };
+    this.trunks = mk(trunk, '#4a3624'); this.crowns = mk(crown, '#2f4a2a');
+    const d = new THREE.Object3D(), c = new THREE.Color();
+    for (let i = 0; i < n; i++) {
+      const x = spots[i * 4], z = spots[i * 4 + 1], k = spots[i * 4 + 2]; d.position.set(x, heightAt(x, z), z); d.rotation.y = spots[i * 4 + 3]; d.scale.set(k, k * (0.9 + 0.3 * ((i * 7) % 5) / 5), k); d.updateMatrix();
+      this.trunks.setMatrixAt(i, d.matrix); this.crowns.setMatrixAt(i, d.matrix);
+      this.trunks.setColorAt(i, c.copy(this.trunks.userData.c)); this.crowns.setColorAt(i, c.copy(this.crowns.userData.c).offsetHSL(0, 0, ((i * 13) % 7) * 0.008 - 0.02));
+    }
+    this.scene.add(this.trunks, this.crowns);
   }
   buildSky() {
     const m = new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { top: { value: col('#5f8cb8') }, hor: { value: col(THEME.haze) } },
+      uniforms: { top: { value: col('#5f8cb8') }, hor: { value: col(THEME.haze) }, uSun: { value: new THREE.Vector3(0, 1, 0) }, uGlow: { value: new THREE.Color(0, 0, 0) } },
       vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'uniform vec3 top; uniform vec3 hor; varying vec3 vP; void main(){ float h = clamp(normalize(vP).y, 0.0, 1.0); gl_FragColor = vec4(mix(hor, top, pow(h, 0.55)), 1.0); }' });
+      fragmentShader: 'uniform vec3 top; uniform vec3 hor; uniform vec3 uSun; uniform vec3 uGlow; varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = clamp(d.y, 0.0, 1.0); float g = max(dot(d, uSun), 0.0); vec3 c = mix(hor, top, pow(h, 0.55)) + uGlow * (pow(g, 8.0) * 0.6 + pow(g, 220.0)); gl_FragColor = vec4(c, 1.0); }' });
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(5000, 24, 12), m); this.sky.frustumCulled = false; this.scene.add(this.sky);
   }
   update(camera, alpha) {
@@ -167,7 +209,7 @@ export class Battlefield {
     camera.updateMatrixWorld(); const e = camera.matrixWorld.elements;
     const cx = e[12], cy = e[13], cz = e[14], rx = e[0], ry = e[1], rz = e[2], ux = e[4], uy = e[5], uz = e[6], fx = -e[8], fy = -e[9], fz = -e[10];
     const ty = Math.tan((camera.fov * Math.PI) / 360) * 1.1, tx = ty * camera.aspect;
-    this.uniforms.uRight.value.set(rx, 0, rz).normalize(); this.sky.position.set(cx, cy, cz);
+    this.uniforms.uRight.value.set(rx, 0, rz).normalize(); this.sky.position.set(cx, cy, cz); this.atmo.update(camera);
     const nr2 = q.nearR * q.nearR, mr2 = q.midR * q.midR;
     let a = 0, b = 0, f = 0, cull = 0; const NA = this.near.A.array, NB_ = this.near.B.array, NC = this.near.C.array, MA = this.mid.A.array, MB = this.mid.B.array, FA = this.far.A.array, FB = this.far.B.array;
     const { x, z, vx, vz, yaw, state, clip, animT, prevClip, prevT, blend, team, seed, removed } = s;
