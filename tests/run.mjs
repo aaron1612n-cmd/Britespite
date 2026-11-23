@@ -8,7 +8,8 @@ import { CLIPS, CLIP } from '../src/clips.js';
 import { Sim, ST, ORD } from '../src/sim.js';
 import * as SG from '../src/siege.js';
 import { ROLE } from '../src/siegerules.js';
-import { cellOf } from '../src/terrain.js';
+import { cellOf, treeRadius } from '../src/terrain.js';
+import { normalSamples, meanLit } from '../src/shade.js';
 
 let fails = 0, passes = 0;
 const check = (name, ok, info = '') => { ok ? passes++ : fails++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  ' + info : ''}`); };
@@ -270,6 +271,19 @@ for (const id of ['hills', 'ford', 'forest']) {
   const ms = (performance.now() - t0) / 300; check('siege tick under 18 ms for 15,000 soldiers', ms < 18, `${ms.toFixed(1)} ms/tick`);
 }
 
+// ---------- one lighting model for every LOD ----------
+{
+  const samples = normalSamples(geo, 1), V = (x, y, z) => ({ x, y, z });
+  const L = { day: [V(0.45, 0.8, 0.35), V(0.85, 0.8, 0.7), V(0.5, 0.58, 0.68), V(0.32, 0.3, 0.26)], dusk: [V(-0.85, 0.26, 0.5), V(0.85, 0.5, 0.3), V(0.36, 0.38, 0.5), V(0.25, 0.21, 0.19)], rain: [V(0.45, 0.8, 0.35), V(0.1, 0.1, 0.1), V(0.42, 0.45, 0.52), V(0.27, 0.25, 0.22)] };
+  for (const k in L) { const r = meanLit(samples, ...L[k]); check(`soldiers facing the sun and away from it differ by under 35% (${k})`, r.lo / r.hi > 0.65, `dimmest/brightest facing ${(r.lo / r.hi).toFixed(2)}`); }
+}
+{ // soldiers do not walk through trees
+  const s = new Sim({ perSide: 800, seed: 5, terrain: 'forest' }), g = s.tr.tg; let bad = 0, worst = 1;
+  check('forest has trees to collide with', g && g.n > 100, `${g && g.n} trees`);
+  for (let t = 0; t < 900; t++) { s.tick(0.05); if (t % 30 === 0) for (let i = 0; i < s.n; i++) { if (s.removed[i]) continue; const cx = Math.floor((s.x[i] + g.w) / g.cs), cz = Math.floor((s.z[i] + g.w) / g.cs); for (const t2 of g.ids) { if (g.x[t2] < s.x[i] - 3 || g.x[t2] > s.x[i] + 3) continue; const d = Math.hypot(s.x[i] - g.x[t2], s.z[i] - g.z[t2]); worst = Math.min(worst, d / g.r[t2]); if (d < g.r[t2] * 0.9) bad++; } } }
+  check('nobody stands inside a tree trunk', bad === 0, `${bad} overlaps, closest ${(worst * 100).toFixed(0)}% of blocking radius`);
+}
+
 // ---------- browser smoke ----------
 let pw; try { pw = await import('playwright'); } catch { pw = await import('/opt/node-tools/node_modules/playwright/index.mjs'); }
 execSync('npx vite build', { stdio: 'ignore' });
@@ -288,6 +302,18 @@ try {
   check('draw calls under 100', r.calls > 0 && r.calls < 100, `${r.calls} calls`);
   check('battle ran in browser', r.alive[0] < 500 || r.alive[1] < 500, `alive ${r.alive}`);
   check('free camera stays above ground', r.y > 0);
+  { // LOD switch is a soft band, not a ring; camera NaNs and a lost GL context both recover
+    const lo = await page.evaluate(() => { const G = window.__GAME__, S = G.sim; G.step(5); G.fly.lookAt(0, 6, -120, 0, 2, 0); G.draw(); const b = G.battle, cam = G.camera; let maxNear = 0, minOther = 1e9;
+      for (let i = 0; i < S.n; i++) { if (S.removed[i]) continue; const d = Math.hypot(S.x[i] - cam.position.x, S.z[i] - cam.position.z, 0.9 - cam.position.y); if (b.lod[i] === 0) maxNear = Math.max(maxNear, d); else minOther = Math.min(minOther, d); }
+      return { maxNear, minOther, near: b.counts.near, mid: b.counts.mid }; });
+    check('near/mid LOD switch is a soft band, not a circle', lo.near === 0 || lo.maxNear > lo.minOther, `farthest full-detail ${lo.maxNear.toFixed(0)} m vs nearest reduced ${lo.minOther.toFixed(0)} m`);
+    const nan = await page.evaluate(() => { const G = window.__GAME__; G.fly.look(NaN, NaN, 0.01); G.fly.yaw = NaN; G.fly.pos.set(NaN, 5, 3); G.fly.update(NaN); G.draw(); return [G.fly.yaw, G.fly.pitch, ...G.fly.pos.toArray()].every(Number.isFinite); });
+    check('NaN input never reaches the camera', nan);
+    const px = await page.evaluate(async () => { const G = window.__GAME__, gl = G.renderer.getContext(), ext = gl.getExtension('WEBGL_lose_context'); G.setCam('front'); if (!ext) return null;
+      ext.loseContext(); await new Promise((r) => setTimeout(r, 150)); ext.restoreContext(); await new Promise((r) => setTimeout(r, 600));
+      G.draw(); const b = new Uint8Array(4); gl.readPixels(Math.floor(gl.drawingBufferWidth / 2), Math.floor(gl.drawingBufferHeight * 0.8), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, b); return [...b]; });
+    check('screen is not black after a lost and restored WebGL context', px === null || px[0] + px[1] + px[2] > 40, JSON.stringify(px));
+  }
   { // siege scenario boots, runs and stays under the draw-call budget
     const sp = await browser.newPage({ viewport: { width: 800, height: 500 } }); const e2 = []; sp.on('console', (m) => { if (m.type() === 'error') e2.push(m.text()); }); sp.on('pageerror', (e) => e2.push(e.message));
     await sp.goto('http://localhost:4173/?test&manual&mode=siege&n=500'); await sp.waitForFunction(() => window.__GAME__ && window.__GAME__.ready, null, { timeout: 30000 });
@@ -296,6 +322,15 @@ try {
     check('siege draw calls under 100', q.calls < 100 && q.calls2 < 100, `${q.calls}/${q.calls2} calls`);
     check('siege battle ran in browser', q.gate < 1400 && q.alive[0] <= 500, `gate ${q.gate | 0}, alive ${q.alive}`);
     await sp.close();
+  }
+  { // the real (worker) path: shared buffers, fast-forward pacing, no errors
+    const wp = await browser.newPage({ viewport: { width: 640, height: 400 } }); const e3 = []; wp.on('console', (m) => { if (m.type() === 'error') e3.push(m.text()); }); wp.on('pageerror', (e) => e3.push(e.message));
+    await wp.goto('http://localhost:4173/?n=2000'); await wp.waitForFunction(() => window.__GAME__ && window.__GAME__.ready && window.__GAME__.sim, null, { timeout: 30000 });
+    await wp.evaluate(() => { const b = document.getElementById('ff'); while (window.__GAME__.speed !== 4) b.click(); }); await wp.waitForTimeout(3500); await wp.waitForFunction(() => window.__GAME__.achieved > 0, null, { timeout: 10000 });
+    const w = await wp.evaluate(() => { const G = window.__GAME__; return { worker: G.worker, ach: G.sim.achieved, tick: G.sim.meta[1], types: G.sim.typeCount && G.sim.utype.length === G.sim.n }; });
+    check('worker mode boots with shared unit-type data and no console errors', w.worker === true && w.types && e3.length === 0, `worker ${w.worker}, ${e3.slice(0, 2).join(' | ')}`);
+    check('fast-forward 4x reaches about 4x on a small battle', w.ach > 3 && w.ach < 5, `achieved ${w.ach.toFixed(2)}x, tick ${w.tick}`);
+    await wp.close();
   }
   const ff = await page.evaluate(() => { const b = document.getElementById('ff'); b.click(); const a = b.textContent; b.click(); b.click(); b.click(); return [a, b.textContent]; });
   check('fast-forward button cycles 1x/2x/4x/8x', ff[0] === '2×' && ff[1] === '1×', ff.join(' -> '));

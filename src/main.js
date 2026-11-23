@@ -30,7 +30,8 @@ const pick = (v, set, d) => (v in set ? v : d);
 const look = { terrain: pick(qs.get('terrain'), TERRAINS, 'flat'), weather: pick(qs.get('weather'), WEATHERS, 'clear'), time: pick(qs.get('time'), TIMES, 'day'), reduced, coarse };
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && !testMode, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75));
+renderer.setClearColor(THEME.haze); // any frame that fails to draw shows haze, never black
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75)); // adapt() may lower this under load
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 6000);
 const fly = new FlyCam(camera, canvas);
@@ -150,13 +151,20 @@ addEventListener('pointerdown', () => { if (!audio.ctx && !audio.muted) audio.st
 
 // ---- loop
 let ev = 0, last = performance.now(), fAcc = 0, fN = 0, statT = 0;
+let fails = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.1, (now - last) / 1000); last = now; G.frame++;
+  try { tick(now); fails = 0; } catch (e) { G.errors.push(String(e)); console.error(e); if (++fails === 4) { fails = 0; start(perSide); } } // a thrown frame must not leave the screen dead
+}
+// WebGL can drop the context (GPU reset, memory pressure, tab switch). three.js re-uploads everything on restore; we just say so.
+canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); G.contextLost = true; flash('Graphics reset. Restoring the battle...'); });
+canvas.addEventListener('webglcontextrestored', () => { G.contextLost = false; resize(); if (battle) battle.refreshImpLit(); flash('Graphics restored'); });
+function tick(now) {
+  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) || 0; last = now; G.frame++;
   if (dir.active && dir.userTookOver()) { dir.stopReplay(); dir.setMode('free'); }
   runSweep(dt); if (!dir.active) fly.update(dt); if (!sim) return;
   let alpha = 0;
-  if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
+  if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / (sim.stepDt || sim.TICK);
   if (!G.paused) dir.rec.record(sim, dt);
   const rs = dir.update(dt, sim, alpha); battle.sim = rs || sim; battle.update(camera, rs ? 0 : alpha); battle.sim = sim; if (flags) { flags.update(dt, now / 1000, alpha); }
   cmdr.draw(reduced);
@@ -176,11 +184,17 @@ function frame(now) {
 // keep the frame rate smooth by trading near-LOD budget
 function adapt() {
   const q = coarse ? 0.35 : 1, b = battle; if (G.fps === 0) return;
-  const f = G.fps < 40 ? 0.85 : G.fps > 57 ? 1.06 : 1; b.scale = Math.min(q * 1.6, Math.max(0.1, (b.scale ?? q) * f)); b.setQuality(b.scale);
+  const f = G.fps < 40 ? 0.85 : G.fps > 57 ? 1.06 : 1; b.scale = Math.min(q * 1.6, Math.max(0.25, (b.scale ?? q) * f)); b.setQuality(b.scale);
+  // still slow with the soldier budget at its floor: render fewer pixels (down to 60%), and win them back when there is room
+  if (!testMode) { if (G.fps < 38 && b.scale <= 0.3 && res > 0.6) setRes(Math.max(0.6, res * 0.88)); else if (G.fps > 57 && res < 1) setRes(Math.min(1, res * 1.06)); }
 }
+const PR = Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75); let res = 1;
+function setRes(r) { res = G.res = r; renderer.setPixelRatio(PR * r); }
 function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
-  const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
+  const c = battle.counts, ach = sim.achieved || 1, behind = speed > 1 && !G.paused && ach < speed * 0.92;
+  $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}` + (speed > 1 ? `\nspeed ${ach.toFixed(1)}× of ${speed}×${behind ? ' (CPU limit)' : ''}` : '');
+  ffBtn.textContent = behind ? `${speed}× · ${ach.toFixed(1)}×` : speed + '×'; ffBtn.title = behind ? `Fast forward (F). This battle is too big for ${speed}×; running at ${ach.toFixed(1)}×` : 'Fast forward (F)'; G.achieved = ach;
   if (flags) flags.refresh();
   const al = sim.alive, de = sim.deaths, P = G.init[0], P1 = G.init[1], t = (id, v) => ($(id).textContent = v.toLocaleString());
   t('sa', al[0]); t('sb', al[1]); t('ka', de[1]); t('kb', de[0]); t('xa', de[0]); t('xb', de[1]);
