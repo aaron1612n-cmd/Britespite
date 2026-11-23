@@ -4,6 +4,7 @@ import { setTerrain, cellOf } from './terrain.js';
 import { slots, FORMATIONS } from './formations.js';
 
 export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
+const ROUTING = false; // soldiers fight on instead of running away
 const MR = 2, ROUT_AT = 0.16, RALLY_AT = 0.5, CELL = 2, REACH = 2.3, SEP = 0.9, AGGRO = 26, TICK = 0.05;
 export const ORD = { NONE: 0, ADVANCE: 1, HOLD: 2, FLANK: 3 };
 const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CLIPS[CLIP.ATTACK].hit;
@@ -113,7 +114,7 @@ export class Sim {
     if (p > 0) this.morale[i] -= (p / courage) * dt;
     else if (E === 0 || (E + 0.3) / F < 0.8) this.morale[i] += (this.rout[i] ? 0.07 : 0.05) * dt * (E === 0 ? 1.5 : 0.3);
     if (this.morale[i] > 1) this.morale[i] = 1;
-    if (!this.rout[i] && this.morale[i] < ROUT_AT) { this.rout[i] = 1; this.routing[me]++; }
+    if (ROUTING && !this.rout[i] && this.morale[i] < ROUT_AT) { this.rout[i] = 1; this.routing[me]++; }
     else if (this.rout[i] && this.morale[i] > RALLY_AT) { this.rout[i] = 0; this.routing[me]--; }
   }
   setClip(i, c, startT = 0) {
