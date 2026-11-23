@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { THEME, applyTheme } from './theme.js';
 import { Sim } from './sim.js';
+import { RemoteSim } from './remote.js';
 import { Battlefield } from './render.js';
 import { FlyCam } from './controls.js';
 import { BattleAudio } from './audio.js';
@@ -30,9 +31,12 @@ let sim, battle;
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
-function start(n) {
-  perSide = n; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
-  scene.clear(); sim = new Sim({ perSide: n, seed: +qs.get('seed') || 1 }); battle = new Battlefield(scene, sim);
+let starting = 0;
+async function start(n) {
+  perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
+  scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1 };
+  const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
+  const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; G.worker = useWorker; battle = new Battlefield(scene, sim);
   battle.setQuality(coarse ? 0.35 : 1);
   G.sim = sim; G.battle = battle; $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
@@ -54,7 +58,7 @@ function runSweep(dt) {
 const sel = $('size'); sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide;
 sel.addEventListener('change', () => start(+sel.value));
 const pauseBtn = $('pause'), muteBtn = $('mute');
-function setPaused(p) { G.paused = p; pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
+function setPaused(p) { G.paused = p; if (sim && sim.setPaused) sim.setPaused(p); pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
 function setMuted(m) { audio.setMuted(m); muteBtn.setAttribute('aria-pressed', m); muteBtn.textContent = m ? 'Sound off' : 'Sound on'; }
 pauseBtn.onclick = () => setPaused(!G.paused); muteBtn.onclick = () => setMuted(!audio.muted); $('restart').onclick = () => start(perSide);
 const hint = $('hint'); let tut = 0;
@@ -76,7 +80,7 @@ let last = performance.now(), fAcc = 0, fN = 0, statT = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000); last = now; G.frame++;
-  runSweep(dt); fly.update(dt);
+  runSweep(dt); fly.update(dt); if (!sim) return;
   let alpha = 0;
   if (!G.paused && !G.manual) alpha = sim.advance(dt); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
   battle.update(camera, alpha);
@@ -101,9 +105,9 @@ function hud() {
   const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
   const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = w === 0 ? 'Crimson holds the field' : 'Azure holds the field'; }
 }
-G.step = (ticks = 1) => { for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
+G.step = (ticks = 1) => { if (!G.worker) for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
 G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };
-G.setCam = setCam; G.restart = start; G.setPaused = setPaused; G.fly = fly; G.camera = camera;
+G.renderer = renderer; G.setCam = setCam; G.restart = start; G.setPaused = setPaused; G.fly = fly; G.camera = camera;
 G.manual = qs.has('manual');
 start(perSide); setMuted(true);
 G.ready = true;
