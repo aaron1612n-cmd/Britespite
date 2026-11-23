@@ -5,9 +5,10 @@ const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
 const blend = (y, yj, band, up, dn) => [up, dn, ss(yj + band, yj - band, y)]; // weight of lower bone
 
 class Builder {
-  constructor() { this.pos = []; this.nrm = []; this.mat = []; this.skin = []; this.idx = []; }
-  add(geo, mat, skinFn) {
+  constructor() { this.pos = []; this.nrm = []; this.mat = []; this.skin = []; this.idx = []; this.tags = {}; }
+  add(geo, mat, skinFn, tag) {
     const p = geo.attributes.position, n = geo.attributes.normal, base = this.pos.length / 3;
+    if (tag) { const r = (this.tags[tag] = this.tags[tag] || []); r.push([base, base + p.count]); }
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
       this.pos.push(x, y, z); this.nrm.push(n.getX(i), n.getY(i), n.getZ(i)); this.mat.push(mat);
@@ -21,7 +22,7 @@ class Builder {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
     g.setAttribute('aMat', new THREE.Float32BufferAttribute(this.mat, 1));
     g.setAttribute('aSkin', new THREE.Float32BufferAttribute(this.skin, 3));
-    g.setIndex(this.idx); return g;
+    g.setIndex(this.idx); g.userData.tags = this.tags; return g;
   }
 }
 
@@ -39,6 +40,8 @@ function loft(rings, segs, caps = true) {
 const ball = (c, r, ws, hs, rot) => { const g = new THREE.SphereGeometry(1, ws, hs); g.scale(r[0], r[1], r[2]); if (rot) { g.rotateX(rot[0] || 0); g.rotateZ(rot[1] || 0); } g.translate(c[0], c[1], c[2]); return g; };
 
 /** detail 0 = full, 1 = mid (fewer segments, no fine facial/hand detail) */
+export const SHIELD_PLANE_Y = 0.8; // rim plane in left-forearm bind space; everything held behind it has larger y
+
 export function buildSoldier(detail = 0) {
   const hi = detail === 0, S = hi ? 12 : 5, E = hi ? [10, 7] : [5, 3];
   const b = new Builder(), one = (bone) => () => [bone, bone, 0];
@@ -53,11 +56,6 @@ export function buildSoldier(detail = 0) {
   const cuirass = loft([
     { y: 1.0, rx: 0.172, rz: 0.114 }, { y: 1.12, rx: 0.148, rz: 0.106 }, { y: 1.24, rx: 0.172, rz: 0.118 }, { y: 1.36, rx: 0.198, rz: 0.13 }, { y: 1.46, rx: 0.205, rz: 0.12 }, { y: 1.5, rx: 0.16, rz: 0.1 }], S + 2);
   b.add(cuirass, MAT.BRONZE, bodySkin);
-  if (hi) for (const s of [1, -1]) {
-    b.add(ball([0.075 * s, 1.38, 0.1], [0.08, 0.062, 0.05], 10, 6), MAT.BRONZE, bodySkin); // pectoral
-    b.add(ball([0.05 * s, 1.2, 0.098], [0.05, 0.04, 0.03], 8, 5), MAT.BRONZE, bodySkin); // abdominal
-    b.add(ball([0.12 * s, 1.5, -0.01], [0.07, 0.05, 0.1], 8, 5), MAT.BRONZE, (x, y) => [B.CHEST, B.CHEST, 0]); // shoulder guard
-  }
   // belt and pteryges (leather strips) + tunic skirt
   const belt = loft([{ y: 0.94, rx: 0.172, rz: 0.116 }, { y: 1.0, rx: 0.176, rz: 0.12 }], S + 2, false); b.add(belt, MAT.LEATHER, PEL);
   const skirt = new THREE.CylinderGeometry(0.19, 0.25, 0.3, S + 3, 1, true); skirt.translate(0, 0.82, 0); b.add(skirt, MAT.TUNIC, PEL);
@@ -81,7 +79,6 @@ export function buildSoldier(detail = 0) {
       b.add(ball([0.032 * s, 1.703, 0.088], [0.012, 0.008, 0.01], 5, 4), MAT.EYE, HD); // eye
       b.add(ball([0.034 * s, 1.72, 0.084], [0.022, 0.007, 0.012], 5, 4, [0, 0.2 * s]), MAT.HAIR, HD); // brow
       b.add(ball([0.077 * s, 1.69, -0.002], [0.01, 0.026, 0.018], 5, 4), MAT.SKIN, HD); // ear
-      b.add(ball([0.06 * s, 1.67, 0.088], [0.014, 0.01, 0.01], 5, 3), MAT.SKIN, HD); // cheek
     }
   }
   // Attic/Corinthian-style helmet: dome, neck guard, cheek plates, crest
@@ -101,21 +98,15 @@ export function buildSoldier(detail = 0) {
     b.add(ball([x, 1.18, 0], [0.042, 0.042, 0.042], E[0], E[1]), MAT.SKIN, () => [U, F, 0.5]);
     b.add(loft([{ y: 1.18, rx: 0.04, rz: 0.04, cx: x }, { y: 1.09, rx: 0.043, rz: 0.042, cx: x }, { y: 0.99, rx: 0.035, rz: 0.034, cx: x }, { y: 0.9, rx: 0.029, rz: 0.026, cx: x }], S, false), MAT.SKIN, (a, y) => blend(y, 1.18, 0.07, U, F));
     const hz = s > 0 ? 0.0 : 0.03; // right hand closes around the spear
-    b.add(ball([x, 0.865, hz], [0.03, 0.04, 0.02], E[0], E[1]), MAT.SKIN, one(F)); // palm
-    if (hi) {
-      b.add(ball([x, 0.835, hz + 0.012], [0.032, 0.022, 0.026], 8, 5), MAT.SKIN, one(F)); // fingers
-      b.add(ball([x + 0.026 * s, 0.87, hz + 0.012], [0.012, 0.028, 0.014], 5, 4), MAT.SKIN, one(F)); // thumb
-    }
+    b.add(ball([x, 0.885, hz], [0.032, 0.045, 0.026], E[0], E[1]), MAT.SKIN, one(F), s > 0 ? 'handL' : 'handR');
   }
   // aspis: dished bronze shield on the left forearm, boss at centre, rim
-  const R = 0.62, th = Math.asin(0.4 / R), dish = new THREE.SphereGeometry(R, hi ? 24 : 10, hi ? 6 : 2, 0, Math.PI * 2, 0, th); dish.rotateX(Math.PI);
-  dish.translate(0.21, 1.1 - 0.0 + R * Math.cos(th) - R + 0.0, 0); // apex points out along -Y (forward when the arm is raised)
-  const apexY = 1.1 - R * (1 - Math.cos(th)); dish.translate(0, 0, 0);
+  const R = 0.62, th = Math.asin(0.4 / R), apexY = SHIELD_PLANE_Y - R * (1 - Math.cos(th));
   const sh = new THREE.SphereGeometry(R, hi ? 24 : 10, hi ? 6 : 2, 0, Math.PI * 2, 0, th); sh.rotateX(Math.PI); sh.translate(0.21, apexY + R, 0);
-  b.add(sh, MAT.ACCENT, one(B.FARM_L));
-  const rim = new THREE.TorusGeometry(0.4, 0.022, 5, hi ? 28 : 14); rim.rotateX(Math.PI / 2); rim.translate(0.21, 1.1, 0); b.add(rim, MAT.BRONZE, one(B.FARM_L));
-  b.add(ball([0.21, apexY - 0.005, 0], [0.075, 0.03, 0.075], 8, 4), MAT.BRONZE, one(B.FARM_L));
-  if (hi) { const ring = new THREE.TorusGeometry(0.26, 0.012, 4, 22); ring.rotateX(Math.PI / 2); ring.translate(0.21, apexY + 0.075, 0); b.add(ring, MAT.BRONZE, one(B.FARM_L)); }
+  b.add(sh, MAT.ACCENT, one(B.FARM_L), 'shield');
+  const rim = new THREE.TorusGeometry(0.4, 0.022, 5, hi ? 28 : 14); rim.rotateX(Math.PI / 2); rim.translate(0.21, SHIELD_PLANE_Y, 0); b.add(rim, MAT.BRONZE, one(B.FARM_L), 'shield');
+  b.add(ball([0.21, apexY + 0.004, 0], [0.06, 0.022, 0.06], 8, 3), MAT.BRONZE, one(B.FARM_L), 'shield');
+  if (hi) { const ring = new THREE.TorusGeometry(0.27, 0.011, 4, 24); ring.rotateX(Math.PI / 2); ring.translate(0.21, apexY + 0.085, 0); b.add(ring, MAT.BRONZE, one(B.FARM_L), 'shield'); }
 
   // ---- legs: quadriceps, knee, calf, greaves, sandals
   for (const s of [1, -1]) {

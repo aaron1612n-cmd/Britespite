@@ -1,8 +1,8 @@
 import { Sim } from './sim.js';
-let sim, paused = false, timer, next;
+let sim, paused = false, timer, next, speed = 1;
 function loop() {
   if (!paused) { sim.tick(sim.TICK); if (sim.hitEvents.length) postMessage({ type: 'hits', hits: sim.hitEvents.slice(0, 24) }); }
-  next += sim.TICK * 1000; const now = performance.now(); if (next < now - 250) next = now;
+  const iv = (sim.TICK * 1000) / speed; sim.meta[2] = iv; next += iv; const now = performance.now(); if (next < now - 250) next = now;
   timer = setTimeout(loop, Math.max(0, next - now));
 }
 onmessage = (e) => {
@@ -13,4 +13,5 @@ onmessage = (e) => {
     postMessage({ type: 'ready', n: sim.n, world: sim.world, perSide: sim.perSide, bufs });
     next = performance.now(); loop();
   } else if (m.type === 'pause') paused = m.v;
+  else if (m.type === 'speed') speed = m.v;
 };

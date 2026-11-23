@@ -8,7 +8,7 @@ const V = (x, y, z) => new Vector3(x, y, z);
 
 export const BASE = {
   px: 0, py: -0.03, pz: 0, prx: 0, pry: 0, prz: 0, crx: 0.02, cry: 0, crz: 0, hrx: 0, hry: 0, hrz: 0,
-  ulx: -0.3, ulz: 0.05, flx: -1.3, urx: -0.35, urz: -0.05, frx: -1.0, spx: 0, spy: 0.95, spz: 0.3,
+  ulx: -0.12, ulz: 0.05, flx: -1.85, urx: -0.35, urz: -0.05, frx: -1.0, spx: 0, spy: 0.95, spz: 0.3,
   lfx: 0.12, lfy: 0.08, lfz: 0.14, rfx: -0.12, rfy: 0.08, rfz: -0.1, lfp: 0, rfp: 0,
   ik: 1, tlx: 0, tlz: 0, slx: 0, trx: 0, trz: 0, srx: 0,
 };

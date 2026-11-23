@@ -1,7 +1,7 @@
 // Automated suite: model/rig geometry, sim determinism + collisions + combat, and a headless browser smoke test.
 // Run: npm test   (needs `npm run build` output only for the browser part; it builds for you)
 import { spawn, execSync } from 'node:child_process';
-import { buildSoldier } from '../src/model.js';
+import { buildSoldier, SHIELD_PLANE_Y } from '../src/model.js';
 import { bakeAll, skinVertices } from '../src/rig.js';
 import { NB, BONES } from '../src/skeleton.js';
 import { CLIPS, CLIP } from '../src/clips.js';
@@ -42,6 +42,17 @@ check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s 
     check(`${label}: planted foot matches ground speed`, stance >= 4 && worst < 0.12 * c.speed + 0.1, `${stance} stance frames, worst error ${worst.toFixed(2)} m/s`);
   }
 }
+{ // hands are held behind the shield (shield and left hand ride the same bone, so bind space is exact)
+  for (const [lod, g] of [['full', geo], ['mid', mid]]) {
+    const p = g.attributes.position; let minHand = 9; for (const [a, b] of g.userData.tags.handL) for (let i = a; i < b; i++) minHand = Math.min(minHand, p.getY(i));
+    check(`left hand sits behind the shield (${lod})`, minHand >= SHIELD_PLANE_Y + 0.01, `hand reaches y ${minHand.toFixed(3)} vs shield plane ${SHIELD_PLANE_Y}`);
+  }
+  // in every pose the shield stays clear of the head/torso zone in front of the chest (no body clipping)
+  let worst = 9; const p = geo.attributes.position, s = geo.attributes.aSkin;
+  const shieldIdx = []; for (const [a, b] of geo.userData.tags.shield) for (let i = a; i < b; i++) shieldIdx.push(i);
+  for (let c = 0; c < CLIPS.length; c++) { if (CLIPS[c].name.startsWith('die')) continue; for (let f = 0; f < bake.info[c].count; f++) { const sk = skinVertices(geo, mats(c, f)); for (const i of shieldIdx) worst = Math.min(worst, sk[i * 3 + 2]); } }
+  check('shield never passes behind the body line', worst > -0.1, `rearmost shield z ${worst.toFixed(2)} m`);
+}
 check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, `${geo.index.count / 3} vs ${mid.index.count / 3} tris`);
 
 // ---------- sim ----------
@@ -80,6 +91,8 @@ try {
   check('draw calls under 100', r.calls > 0 && r.calls < 100, `${r.calls} calls`);
   check('battle ran in browser', r.alive[0] < 500 || r.alive[1] < 500, `alive ${r.alive}`);
   check('free camera stays above ground', r.y > 0);
+  const ff = await page.evaluate(() => { const b = document.getElementById('ff'); b.click(); const a = b.textContent; b.click(); b.click(); b.click(); return [a, b.textContent]; });
+  check('fast-forward button cycles 1x/2x/4x/8x', ff[0] === '2×' && ff[1] === '1×', ff.join(' -> '));
   const t0 = await page.evaluate(() => { const G = window.__GAME__, a = performance.now(); for (let i = 0; i < 10; i++) G.draw(); return (performance.now() - a) / 10; });
   console.log(`INFO  software-GL frame cost ${t0.toFixed(0)} ms (CPU submit only, headless software GL; real FPS needs a GPU)`);
 } finally { await browser.close(); srv.kill(); }
