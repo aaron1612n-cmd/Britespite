@@ -106,7 +106,7 @@ function adapt() {
 function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
   const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
-  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = w === 0 ? 'Crimson holds the field' : 'Azure holds the field'; }
+  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = (w === 0 ? 'Crimson holds the field' : 'Azure holds the field') + ` · ${sim.alive[w].toLocaleString()} survive, ${(sim.n / 2 - sim.alive[w] + sim.n / 2 - sim.alive[1 - w]).toLocaleString()} fell`; } else bn.style.display = 'none';
 }
 G.step = (ticks = 1) => { if (!G.worker) for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
 G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };
