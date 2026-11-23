@@ -19,7 +19,9 @@ const coarse = matchMedia('(pointer:coarse)').matches;
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const testMode = qs.has('test');
 const SIZES = [500, 2000, 5000, 10000, 20000, 35000, 50000];
-let perSide = +qs.get('n') || (coarse ? 3000 : 10000);
+let mode = qs.get('mode') === 'siege' ? 'siege' : 'open';
+const defaultSize = () => (mode === 'siege' ? (coarse ? 1000 : 1500) : coarse ? 3000 : 10000);
+let perSide = +qs.get('n') || defaultSize();
 if (!SIZES.includes(perSide)) SIZES.push(perSide), SIZES.sort((a, b) => a - b);
 
 const pick = (v, set, d) => (v in set ? v : d);
@@ -57,13 +59,14 @@ const form = [0, 1].map((i) => (FORMATIONS[qf[i] || qf[0]] ? qf[i] || qf[0] : 'b
 let starting = 0;
 async function start(n) {
   perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) battle.dispose();
-  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1, terrain: look.terrain, formations: form.slice() };
+  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1, terrain: look.terrain, formations: form.slice(), mode };
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
   const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; cmdr.ids = []; cmdr.dest = null; cmdr.refresh(); audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim, look);
-  battle.setQuality(coarse ? 0.35 : 1); flags = new Standards(scene, sim, cols(), reduced); applyColors();
+  battle.setQuality(coarse ? 0.35 : 1); flags = mode === 'siege' ? null : new Standards(scene, sim, cols(), reduced); applyColors(); G.mode = mode; G.init = [sim.alive[0], sim.alive[1]]; $('mode').value = mode;
   G.sim = sim; G.battle = battle; if (sim.setSpeed) sim.setSpeed(speed); $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
-  G.view = { front: [w * 0.08, 9, rz, 0, 3, 90], over: [0, Math.max(50, w * 0.5), rz - w * 0.25, 0, 0, 60], ground: [-w * 0.5 + 8, 2.0, -86, -w * 0.5 + 40, 2.2, -82] };
+  G.view = mode === 'siege' ? { front: [22, 9, -38, 0, 4, 0], over: [0, 75, -80, 0, 0, -8], ground: [-10, 2.4, -13, 0, 3.2, -3] }
+    : { front: [w * 0.08, 9, rz, 0, 3, 90], over: [0, Math.max(50, w * 0.5), rz - w * 0.25, 0, 0, 60], ground: [-w * 0.5 + 8, 2.0, -86, -w * 0.5 + 40, 2.2, -82] };
   dir.reset(sim); setCam(reduced || testMode ? 'front' : null);
 }
 function setCam(name) {
@@ -79,7 +82,10 @@ function runSweep(dt) {
 }
 
 // ---- UI
-const sel = $('size'); sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide;
+const sel = $('size'), modeSel = $('mode');
+function fillSizes() { sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(mode === 'siege' ? s + Math.max(40, s >> 1) : s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide; for (const id of ['fa', 'fb']) $(id).hidden = mode === 'siege'; }
+fillSizes(); modeSel.value = mode;
+modeSel.addEventListener('change', () => { mode = modeSel.value; perSide = defaultSize(); if (!SIZES.includes(perSide)) SIZES.push(perSide), SIZES.sort((a, b) => a - b); fillSizes(); start(perSide); });
 for (const [id, i] of [['fa', 0], ['fb', 1]]) { const el = $(id); el.innerHTML = FORMATION_KEYS.map((k) => `<option value="${k}">${FORMATIONS[k].name}</option>`).join(''); el.value = form[i]; el.title = 'Formation (applies on restart)'; el.addEventListener('change', () => { form[i] = el.value; start(perSide); }); }
 sel.addEventListener('change', () => start(+sel.value));
 for (const [id, set, key] of [['terrain', TERRAINS, 'terrain'], ['weather', WEATHERS, 'weather'], ['time', TIMES, 'time']]) {
@@ -169,11 +175,11 @@ function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
   const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
   if (flags) flags.refresh();
-  const al = sim.alive, de = sim.deaths, P = sim.perSide, t = (id, v) => ($(id).textContent = v.toLocaleString());
+  const al = sim.alive, de = sim.deaths, P = G.init[0], P1 = G.init[1], t = (id, v) => ($(id).textContent = v.toLocaleString());
   t('sa', al[0]); t('sb', al[1]); t('ka', de[1]); t('kb', de[0]); t('xa', de[0]); t('xb', de[1]);
-  $('pa').textContent = Math.round((al[0] / P) * 100) + '%'; $('pb').textContent = Math.round((al[1] / P) * 100) + '%';
+  $('pa').textContent = Math.round((al[0] / P) * 100) + '%'; $('pb').textContent = Math.round((al[1] / P1) * 100) + '%';
   const tot = al[0] + al[1] || 1; $('bara').style.width = (al[0] / tot) * 100 + '%'; $('barb').style.width = (al[1] / tot) * 100 + '%';
-  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = `${pal[ci[w]].n} holds the field`; } else bn.style.display = 'none';
+  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = mode === 'siege' ? (w === 0 ? 'The walls have fallen' : 'The siege is broken') : `${pal[ci[w]].n} holds the field`; } else bn.style.display = 'none';
 }
 G.step = (ticks = 1) => { if (!G.worker) for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
 G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };

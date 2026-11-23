@@ -12,15 +12,15 @@ const damp = (rate, dt) => 1 - Math.exp(-rate * dt);
 export class Recorder {
   constructor(sim) {
     const n = sim.n; this.n = n;
-    this.cap = Math.max(8, Math.min(160, Math.floor(48e6 / (19 * n))));
+    this.cap = Math.max(8, Math.min(160, Math.floor(48e6 / (23 * n))));
     this.interval = Math.max(0.05, 6 / this.cap);
     this.frames = []; this.head = 0; this.count = 0; this.t = 0; this.acc = 0;
-    for (let i = 0; i < this.cap; i++) this.frames.push({ x: new Float32Array(n), z: new Float32Array(n), yaw: new Float32Array(n), animT: new Float32Array(n), clip: new Uint8Array(n), state: new Uint8Array(n), removed: new Uint8Array(n), t: 0 });
+    for (let i = 0; i < this.cap; i++) this.frames.push({ x: new Float32Array(n), z: new Float32Array(n), yaw: new Float32Array(n), elev: new Float32Array(n), animT: new Float32Array(n), clip: new Uint8Array(n), state: new Uint8Array(n), removed: new Uint8Array(n), t: 0 });
   }
   get seconds() { return this.count > 1 ? (this.count - 1) * this.interval : 0; }
   record(sim, dt) {
     this.acc += dt; this.t += dt; if (this.acc < this.interval) return; this.acc -= this.interval; if (this.acc > this.interval) this.acc = 0;
-    const f = this.frames[this.head]; f.x.set(sim.x); f.z.set(sim.z); f.yaw.set(sim.yaw); f.animT.set(sim.animT); f.clip.set(sim.clip); f.state.set(sim.state); f.removed.set(sim.removed);
+    const f = this.frames[this.head]; f.x.set(sim.x); f.z.set(sim.z); f.yaw.set(sim.yaw); f.elev.set(sim.elev); f.animT.set(sim.animT); f.clip.set(sim.clip); f.state.set(sim.state); f.removed.set(sim.removed);
     this.head = (this.head + 1) % this.cap; this.count = Math.min(this.cap, this.count + 1);
   }
   /** frame k counted from the oldest (0) to the newest (count-1) */
@@ -31,7 +31,7 @@ export class Recorder {
 class ReplaySim {
   constructor(sim) {
     const n = sim.n; this.n = n; this.TICK = sim.TICK; this.world = sim.world; this.team = sim.team; this.seed = sim.seed; this.alive = sim.alive; this.hitEvents = [];
-    for (const k of ['x', 'z', 'yaw', 'animT']) this[k] = new Float32Array(n);
+    for (const k of ['x', 'z', 'yaw', 'animT', 'elev']) this[k] = new Float32Array(n);
     for (const k of ['clip', 'state', 'removed', 'prevClip']) this[k] = new Uint8Array(n);
     this.vx = new Float32Array(n); this.vz = new Float32Array(n); this.prevT = new Float32Array(n); this.blend = new Float32Array(n).fill(1);
   }
@@ -88,7 +88,7 @@ export class CamDirector {
     const r = this.rec, o = this.rsim, k = Math.min(r.count - 1.001, replay.t / r.interval), i = Math.floor(k), f = k - i, A = r.at(i), B = r.at(i + 1);
     for (let j = 0; j < o.n; j++) {
       o.x[j] = A.x[j] + (B.x[j] - A.x[j]) * f; o.z[j] = A.z[j] + (B.z[j] - A.z[j]) * f; o.yaw[j] = lerpAng(A.yaw[j], B.yaw[j], f);
-      o.animT[j] = A.animT[j] + f * r.interval; o.clip[j] = A.clip[j]; o.state[j] = A.state[j]; o.removed[j] = A.removed[j];
+      o.elev[j] = A.elev[j] + (B.elev[j] - A.elev[j]) * f; o.animT[j] = A.animT[j] + f * r.interval; o.clip[j] = A.clip[j]; o.state[j] = A.state[j]; o.removed[j] = A.removed[j];
     }
   }
   /** per frame. Returns the sim-like source to render, or null to render live. */

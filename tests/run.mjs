@@ -6,6 +6,8 @@ import { bakeAll, skinVertices } from '../src/rig.js';
 import { NB, BONES } from '../src/skeleton.js';
 import { CLIPS, CLIP } from '../src/clips.js';
 import { Sim, ST, ORD } from '../src/sim.js';
+import * as SG from '../src/siege.js';
+import { ROLE } from '../src/siegerules.js';
 import { cellOf } from '../src/terrain.js';
 
 let fails = 0, passes = 0;
@@ -120,6 +122,67 @@ for (const id of ['hills', 'ford', 'forest']) {
   check('standard is human scale', STD.pole <= 3.2 && STD.pole >= 2.2 && STD.clothW <= 0.9 && STD.clothH <= 0.6, `pole ${STD.pole} m, cloth ${STD.clothW}x${STD.clothH} m`);
   check('standard is gripped beside the bearer', Math.hypot(STD.offR, STD.offF) < 0.45 && STD.base < 1.2 && STD.base + STD.pole > 1.2, `hand offset ${Math.hypot(STD.offR, STD.offF).toFixed(2)} m, grip height 1.2 m inside pole span`);
 }
+// ---------- siege: prop geometry ----------
+{
+  const P = SG.siegeParams(140), parts = { wall: SG.buildWall(P), leaf: SG.buildLeaf(), ladder: SG.buildLadder(), 'ram frame': SG.buildRamFrame(), 'ram log': SG.buildRamLog() };
+  let flipped = 0, faces = 0;
+  for (const [name, b] of Object.entries(parts)) {
+    for (const pr of b.prims) for (let t = pr.i0; t < pr.i1; t += 3) {
+      const [a, c, d] = [b.idx[t], b.idx[t + 1], b.idx[t + 2]].map((k) => [b.pos[k * 3], b.pos[k * 3 + 1], b.pos[k * 3 + 2]]);
+      const nx = (c[1] - a[1]) * (d[2] - a[2]) - (c[2] - a[2]) * (d[1] - a[1]), ny = (c[2] - a[2]) * (d[0] - a[0]) - (c[0] - a[0]) * (d[2] - a[2]), nz = (c[0] - a[0]) * (d[1] - a[1]) - (c[1] - a[1]) * (d[0] - a[0]);
+      const fx = (a[0] + c[0] + d[0]) / 3 - pr.center[0], fy = (a[1] + c[1] + d[1]) / 3 - pr.center[1], fz = (a[2] + c[2] + d[2]) / 3 - pr.center[2]; faces++;
+      if (nx * fx + ny * fy + nz * fz < -1e-9) flipped++;
+    }
+    // loose parts: every primitive must touch the rest through overlapping bounds (one connected piece per mesh)
+    const n = b.prims.length, seen = new Set([0]), q = [0], eps = 0.03;
+    while (q.length) { const i = q.pop(); for (let j = 0; j < n; j++) if (!seen.has(j)) { const A = b.prims[i], B = b.prims[j]; if ([0, 1, 2].every((k) => A.min[k] <= B.max[k] + eps && B.min[k] <= A.max[k] + eps)) { seen.add(j); q.push(j); } } }
+    check(`siege ${name}: no loose parts`, seen.size === n, `${seen.size}/${n} connected`);
+  }
+  check('siege props: every face winds outward', flipped === 0, `${flipped}/${faces} faces flipped`);
+  const w = parts.wall; let inGate = 0; for (let i = 0; i < w.pos.length; i += 3) { const x = w.pos[i], y = w.pos[i + 1], z = w.pos[i + 2]; if (Math.abs(x) < SG.GATE_HALF - 0.01 && y > 0.01 && y < SG.SPRING - 0.01 && Math.abs(z) < SG.HT) inGate++; }
+  check('gate opening is clear of stonework', inGate === 0, `${inGate} vertices inside the doorway`);
+  let minY = 9; for (const b of Object.values(parts)) if (b !== parts['ram log']) for (let i = 1; i < b.pos.length; i += 3) minY = Math.min(minY, b.pos[i]);
+  check('nothing floats above ground or leaves a gap under the wall', minY >= -3.001 && parts.ladder.prims.every((p) => p.min[1] >= -0.001) && parts['ram frame'].prims.every((p) => p.min[1] >= -0.001));
+  const fr = parts['ram frame'], frameX = Math.max(...fr.prims.filter((p) => p.min[1] < 2.5).map((p) => p.max[0])); // below head height (the roof overhang is above the crew)
+  check('ram crew stand clear of the ram frame', SG.RAM.slotX - 0.3 > frameX, `frame edge ${frameX.toFixed(2)} m, crew at ${SG.RAM.slotX} m`);
+  const gap = -SG.HT - (SG.RAM.stopZ + SG.RAM.headZ); check('ram head rests against the gate (no gap, no overlap into it)', gap >= 0 && gap < 0.15, `gap ${gap.toFixed(2)} m`);
+  const top = SG.LADDER_FOOT_Z + SG.LADDER_LEN * Math.sin(SG.LADDER_LEAN), topY = SG.LADDER_LEN * Math.cos(SG.LADDER_LEAN);
+  check('raised ladders reach the wall walkway', topY >= SG.WALL_H && top >= -SG.HT - 0.5 && top <= -SG.HT + 0.2, `top at z ${top.toFixed(2)}, y ${topY.toFixed(2)}`);
+  check('ladders stay clear of towers', P.ladders.every((x) => P.towers.every((t) => Math.abs(x - t) > SG.TOWER_R + 2)) && P.ladders.length >= 6, `${P.ladders.length} ladders`);
+}
+// ---------- siege: sim ----------
+{
+  const run = (seed, N, ticks, probe) => { const s = new Sim({ perSide: N, seed, mode: 'siege' }); for (let t = 0; t < ticks; t++) { s.tick(0.05); if (probe) probe(s, t); } return s; };
+  const a = run(4, 300, 1800), b = run(4, 300, 1800);
+  check('siege sim is deterministic', a.hash() === b.hash(), `hash ${a.hash()}`);
+  const bad = { band: 0, early: 0, top: 0, elev: 0, tower: 0, nan: 0, floating: 0 }; let everTop = 0, gateAt = -1, maxClimb = 0;
+  const s = run(4, 300, 6000, (s, t) => {
+    const open = s.sg[1] >= 0.6; if (gateAt < 0 && s.sg[0] <= 0) gateAt = t; let climb = 0;
+    for (let i = 0; i < s.n; i++) {
+      if (s.removed[i]) continue; const x = s.x[i], z = s.z[i], e = s.elev[i], dead = s.state[i] === ST.DEAD;
+      if (!Number.isFinite(x + z + e)) bad.nan++;
+      if (e < -0.001 || e > SG.WALL_H + 0.4) bad.elev++;
+      if (s.prog[i] >= 0) climb++;
+      if (dead) { if (e > 0.2 && s.role[i] !== ROLE.POST && s.role[i] !== ROLE.FALL) bad.floating++; continue; }
+      if (s.role[i] === ROLE.POST) { everTop++; if (Math.abs(e - SG.WALL_H) > 0.01 || Math.abs(z) > 1.05) bad.top++; }
+      if (e < 1) {
+        if (Math.abs(z) < SG.HT - 0.05 && !(open && Math.abs(x) < SG.GATE_HALF + 0.05)) bad.band++;
+        if (!open && Math.abs(z) < SG.HT + 0.2 && Math.abs(x) < SG.GATE_HALF) bad.early++;
+        for (const tx of s.siege.P.towers) if (Math.hypot(x - tx, z) < SG.TOWER_R - 0.1) bad.tower++;
+      }
+    }
+    maxClimb = Math.max(maxClimb, climb);
+  });
+  check('nobody walks through the wall, closed gate or towers', bad.band + bad.early + bad.tower === 0, JSON.stringify(bad));
+  check('wall-top units stay on the walkway; climbers stay on the ladder height range', bad.top + bad.elev + bad.nan === 0);
+  check('fallen climbers do not hang in mid air', bad.floating === 0, `${bad.floating} frames`);
+  check('ladders get climbed and the wall top is reached', maxClimb > 0 && everTop > 0, `${maxClimb} climbers at once`);
+  check('ram breaks the gate and the doors swing open', s.sg[0] <= 0 && s.sg[1] >= 0.99 && s.sg[6] > 3, `gate broke at ${(gateAt / 20).toFixed(0)} s after ${s.sg[6]} hits`);
+  check('siege ends with a winner', s.winner() >= 0, `alive ${s.alive[0]}/${s.alive[1]}`);
+  const t0 = performance.now(), big = new Sim({ perSide: 10000, seed: 2, mode: 'siege' }); for (let i = 0; i < 300; i++) big.tick(0.05);
+  const ms = (performance.now() - t0) / 300; check('siege tick under 18 ms for 15,000 soldiers', ms < 18, `${ms.toFixed(1)} ms/tick`);
+}
+
 // ---------- browser smoke ----------
 let pw; try { pw = await import('playwright'); } catch { pw = await import('/opt/node-tools/node_modules/playwright/index.mjs'); }
 execSync('npx vite build', { stdio: 'ignore' });
@@ -138,6 +201,15 @@ try {
   check('draw calls under 100', r.calls > 0 && r.calls < 100, `${r.calls} calls`);
   check('battle ran in browser', r.alive[0] < 500 || r.alive[1] < 500, `alive ${r.alive}`);
   check('free camera stays above ground', r.y > 0);
+  { // siege scenario boots, runs and stays under the draw-call budget
+    const sp = await browser.newPage({ viewport: { width: 800, height: 500 } }); const e2 = []; sp.on('console', (m) => { if (m.type() === 'error') e2.push(m.text()); }); sp.on('pageerror', (e) => e2.push(e.message));
+    await sp.goto('http://localhost:4173/?test&manual&mode=siege&n=500'); await sp.waitForFunction(() => window.__GAME__ && window.__GAME__.ready, null, { timeout: 30000 });
+    const q = await sp.evaluate(() => { const G = window.__GAME__; G.draw(); G.step(900); G.setCam('ground'); G.draw(); const out = { calls: G.renderer.info.render.calls, mode: G.mode, gate: G.sim.sg[0], alive: [...G.sim.alive] }; G.setCam('over'); G.draw(); out.calls2 = G.renderer.info.render.calls; return out; });
+    check('siege mode boots in the browser with no console errors', q.mode === 'siege' && e2.length === 0, e2.join(' | '));
+    check('siege draw calls under 100', q.calls < 100 && q.calls2 < 100, `${q.calls}/${q.calls2} calls`);
+    check('siege battle ran in browser', q.gate < 1400 && q.alive[0] <= 500, `gate ${q.gate | 0}, alive ${q.alive}`);
+    await sp.close();
+  }
   const ff = await page.evaluate(() => { const b = document.getElementById('ff'); b.click(); const a = b.textContent; b.click(); b.click(); b.click(); return [a, b.textContent]; });
   check('fast-forward button cycles 1x/2x/4x/8x', ff[0] === '2×' && ff[1] === '1×', ff.join(' -> '));
   const cam = await page.evaluate(async () => {

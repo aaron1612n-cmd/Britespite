@@ -2,6 +2,7 @@
 import { CLIP, CLIPS } from './clips.js';
 import { setTerrain, cellOf } from './terrain.js';
 import { slots, FORMATIONS } from './formations.js';
+import { SiegeRules } from './siegerules.js';
 
 export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
 const ROUTING = false; // soldiers fight on instead of running away
@@ -12,11 +13,12 @@ const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CL
 function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 export class Sim {
-  constructor({ shared = false, formations = ['block', 'block'], terrain = 'flat', perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000 } = {}) {
+  constructor({ shared = false, formations = ['block', 'block'], terrain = 'flat', perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000, mode = 'open' } = {}) {
     this.formations = formations; this.slots = [slots(formations[0], perSide, rng(seed * 7 + 1)), slots(formations[1], perSide, rng(seed * 7 + 2))];
     this.fSpd = formations.map((k) => FORMATIONS[k].spd); this.fDef = formations.map((k) => FORMATIONS[k].def);
     world = Math.max(120, Math.max(this.slots[0].halfWidth, this.slots[1].halfWidth, gap / 2 + Math.max(this.slots[0].depth, this.slots[1].depth)) + 70);
-    this.terrainId = terrain; this.tr = setTerrain(terrain, world);
+    if (mode === 'siege') { world = SiegeRules.world(perSide); terrain = 'flat'; }
+    this.mode = mode; this.terrainId = terrain; this.tr = setTerrain(terrain, world);
     this.perSide = perSide; this.n = perSide * 2; this.world = world; this.corpseLife = corpseLife; this.corpseCap = corpseCap;
     const n = this.n; const A = (T, m) => (shared ? new T(new SharedArrayBuffer(m * T.BYTES_PER_ELEMENT)) : new T(m)); this.rand = rng(seed); this.time = 0; this.tickCount = 0; this.acc = 0; this.TICK = TICK;
     this.x = A(Float32Array, n); this.z = A(Float32Array, n); this.vx = A(Float32Array, n); this.vz = A(Float32Array, n);
@@ -24,15 +26,16 @@ export class Sim {
     this.animT = A(Float32Array, n); this.prevT = A(Float32Array, n); this.blend = A(Float32Array, n).fill(1);
     this.spd = A(Float32Array, n); this.team = A(Uint8Array, n); this.state = A(Uint8Array, n); this.clip = A(Uint8Array, n);
     this.ord = A(Uint8Array, n); this.ox = A(Float32Array, n); this.oz = A(Float32Array, n); this.prevClip = A(Uint8Array, n); this.removed = A(Uint8Array, n); this.hitDone = A(Uint8Array, n); this.seed = A(Float32Array, n);
+    this.elev = A(Float32Array, n); this.prog = A(Float32Array, n).fill(-1); this.role = A(Uint8Array, n); this.lad = A(Int8Array, n).fill(-1); this.sg = A(Float32Array, 16);
     this.tgt = A(Int32Array, n).fill(-1); this.deadQ = []; this.deadHead = 0;
     this.alive = A(Int32Array, 2); this.alive[0] = this.alive[1] = perSide; this.deaths = A(Int32Array, 2);
     this.meta = A(Float64Array, 4); this.hits = 0; this.hitEvents = []; // {x,z,kill}
-    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta'];
+    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta','elev','prog','role','lad','sg'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n);
     this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0]; this.over = -1; // over: -1 running, else winning team
     // morale (sim-internal, not shared): 1 = steady, below ROUT_AT the unit breaks and runs
     this.morale = new Float32Array(n).fill(1); this.rout = new Uint8Array(n); this.fled = [0, 0]; this.routing = [0, 0];
-    this.layout(spacing, gap);
+    if (mode === 'siege') { this.siege = new SiegeRules(this); this.siege.layout(); } else this.layout(spacing, gap);
   }
   layout(spacing, gap) {
     const N = this.perSide;
@@ -66,7 +69,7 @@ export class Sim {
   }
   nearestEnemy(i) {
     const c = this.cells, ci = this.cellOf[i], cx = ci % c, cz = (ci / c) | 0, me = this.team[i], px = this.x[i], pz = this.z[i];
-    let best = -1, bd = 1e12, found = -1; const maxR = 13;
+    let best = -1, bd = 1e12, found = -1; const sg = this.siege, maxR = sg ? sg.searchR(i) : 13;
     for (let r = 0; r <= maxR; r++) {
       if (found >= 0 && r > found + 1) break;
       for (let dz = -r; dz <= r; dz++) {
@@ -76,7 +79,7 @@ export class Sim {
           const xx = cx + dx; if (xx < 0 || xx >= c) continue;
           const cc = zz * c + xx;
           for (let k = this.cellStart[cc]; k < this.cellStart[cc + 1]; k++) {
-            const j = this.order[k]; if (this.team[j] === me) continue;
+            const j = this.order[k]; if (this.team[j] === me || (sg && !sg.canReach(i, j))) continue;
             const ex = this.x[j] - px, ez = this.z[j] - pz, d = ex * ex + ez * ez;
             if (d < bd) { bd = d; best = j; }
           }
@@ -149,19 +152,20 @@ export class Sim {
   advance(dt, speed = 1) { this.acc += dt * speed; const cap = 4 * Math.ceil(speed); let k = 0; while (this.acc >= TICK && k < cap) { this.tick(TICK); this.acc -= TICK; k++; } if (k === cap) this.acc = 0; return this.acc / TICK; }
   tick(dt) {
     const n = this.n, c = this.cells; this.time += dt; this.tickCount++; this.meta[0] = performance.timeOrigin + performance.now(); this.meta[1] = this.tickCount; this.hitEvents.length = 0;
+    if (this.siege) this.siege.pre(dt);
     this.buildGrid();
     if (this.over < 0 && (this.alive[0] === 0 || this.alive[1] === 0)) this.endBattle();
     const { x, z, vx, vz, yaw, team, state, stateT, cd, tgt, spd, clip } = this;
     for (let i = 0; i < n; i++) {
       const st = state[i]; if (st === ST.DEAD || st === ST.CHEER || this.removed[i]) continue;
-      stateT[i] += dt; cd[i] -= dt; if (((this.tickCount + i) & 3) === 0 && st !== ST.HIT) this.moraleCheck(i, dt * 4); const me = team[i], dir = me === 0 ? 1 : -1;
+      stateT[i] += dt; cd[i] -= dt; if (((this.tickCount + i) & 3) === 0 && st !== ST.HIT && !this.siege) this.moraleCheck(i, dt * 4); const me = team[i], dir = me === 0 ? 1 : -1;
       let desX = 0, desZ = 0, sp = 0;
       if (st === ST.ATTACK) {
         const j = tgt[i];
         if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; this.turn(i, Math.atan2(ex, ez), dt, 8); }
         if (!this.hitDone[i] && stateT[i] >= T_HIT) {
           this.hitDone[i] = 1;
-          if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (REACH + 0.5) ** 2 && this.rand() < 0.7 - this.fDef[team[j]]) this.damage(j, (28 + this.rand() * 22) * (this.tr.fx ? this.combatMul(i, j) : 1), i); }
+          if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (REACH + 0.5) ** 2 && this.rand() < 0.7 - this.fDef[team[j]]) this.damage(j, (28 + this.rand() * 22) * (this.tr.fx ? this.combatMul(i, j) : 1) * (this.siege ? this.siege.dmgMul(i, j) : 1), i); }
         }
         if (stateT[i] >= D_ATTACK) { state[i] = ST.MOVE; cd[i] = 0.4 + this.rand() * 0.5; }
       } else if (st === ST.HIT) {
@@ -177,7 +181,7 @@ export class Sim {
         if (((this.tickCount + i) & 7) === 0) tgt[i] = this.nearestEnemy(i);
       } else {
         let j = tgt[i];
-        if (j < 0 || state[j] === ST.DEAD || ((this.tickCount + i) & 7) === 0) {
+        if (((this.tickCount + i) & 7) === 0 || (j >= 0 ? state[j] === ST.DEAD : !this.siege)) {
           const ahead = (me === 0 ? this.frontZ[1] - z[i] : z[i] - this.frontZ[0]);
           j = ahead > AGGRO ? -1 : this.nearestEnemy(i); tgt[i] = j;
         }
@@ -205,6 +209,7 @@ export class Sim {
           else { sp = d > 7 ? 3.4 : 1.6; desX = ex / d; desZ = ez / d; }
         } else { sp = 1.4; const ox = 1 - me, ex = this.cenX[ox] - x[i], ez = this.cenZ[ox] - z[i], l = Math.hypot(ex, ez) || 1; desX = ex / l; desZ = ez / l; this.turn(i, Math.atan2(desX, desZ), dt, 4); }
         if (this.tr.ford && sp > 0) { const q = this.fordSteer(i, desX, desZ, j >= 0 ? Math.hypot(x[j] - x[i], z[j] - z[i]) : 99, dir); desX = q[0]; desZ = q[1]; }
+        if (this.siege) { this.siege.steer(i, j, desX, desZ, sp); desX = this.siege.ox; desZ = this.siege.oz; sp = this.siege.osp; }
         sp *= spd[i] * this.fSpd[me]; if (this.tr.fx && sp > 0) sp *= this.moveMul(i, desX, desZ);
         const a = Math.min(1, 5 * dt); vx[i] += (desX * sp - vx[i]) * a; vz[i] += (desZ * sp - vz[i]) * a;
       }
@@ -216,10 +221,11 @@ export class Sim {
         for (let dx = -1; dx <= 1; dx++) { const xx = cx + dx; if (xx < 0 || xx >= c) continue; const cc = zz * c + xx;
           for (let k = this.cellStart[cc], e = this.cellStart[cc + 1]; k < e; k++) { const j = this.order[k]; if (j === i) continue;
             const ex = x[i] - x[j], ez = z[i] - z[j], d2 = ex * ex + ez * ez;
-            if (d2 < SEP * SEP) { const d = Math.sqrt(d2) || 0.001, push = (SEP - d) / SEP; sx += (ex / d) * push; sz += (ez / d) * push; if (d2 === 0) { sx += (i & 1) - 0.5; } } } } }
+            if (d2 < SEP * SEP && !(this.siege && Math.abs(this.elev[i] - this.elev[j]) > 1.5)) { const d = Math.sqrt(d2) || 0.001, push = (SEP - d) / SEP; sx += (ex / d) * push; sz += (ez / d) * push; if (d2 === 0) { sx += (i & 1) - 0.5; } } } } }
       x[i] += vx[i] * dt + sx * 0.32; z[i] += vz[i] * dt + sz * 0.32;
       if (x[i] < -this.world + 5) x[i] = -this.world + 5; else if (x[i] > this.world - 5) x[i] = this.world - 5;
       if (z[i] < -this.world + 5) z[i] = -this.world + 5; else if (z[i] > this.world - 5) z[i] = this.world - 5;
+      if (this.siege) this.siege.post(i, dt);
       // animation selection
       const s = Math.hypot(vx[i], vz[i]);
       if (state[i] === ST.ATTACK) this.setClip(i, CLIP.ATTACK, 0);
@@ -234,7 +240,7 @@ export class Sim {
       if (cl.speed) this.animT[i] += dt * Math.max(0.4, Math.min(1.8, Math.hypot(vx[i], vz[i]) / cl.speed)); else this.animT[i] += dt;
       if (cl.loop) { if (this.animT[i] > cl.dur) this.animT[i] -= cl.dur; } else if (this.animT[i] > cl.dur) this.animT[i] = cl.dur;
       if (this.blend[i] < 1) this.blend[i] = Math.min(1, this.blend[i] + dt / 0.18);
-      if (state[i] === ST.DEAD) { stateT[i] += dt; if (stateT[i] > this.corpseLife) this.removed[i] = 1; }
+      if (state[i] === ST.DEAD) { stateT[i] += dt; if (this.siege) this.siege.fall(i, dt); if (stateT[i] > this.corpseLife) this.removed[i] = 1; }
     }
     while (this.deadQ.length - this.deadHead > this.corpseCap) this.removed[this.deadQ[this.deadHead++]] = 1;
     if (this.deadHead > 4096) { this.deadQ = this.deadQ.slice(this.deadHead); this.deadHead = 0; }
