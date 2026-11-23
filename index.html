@@ -18,6 +18,12 @@
   .tally div { background:var(--panel); padding:6px 10px; border-left:5px solid; font-size:14px; min-width:96px; }
   .tally .a { border-color:var(--teamA); } .tally .b { border-color:var(--teamB); }
   .tally b { font-size:18px; display:block; }
+  .panel { background:var(--panel); padding:6px 10px; font-size:12px; width:max-content; max-width:80vw; }
+  .panel table { border-collapse:collapse; } .panel th { font-weight:400; color:var(--muted); text-align:left; padding:2px 10px 2px 0; } .panel td, .panel thead th:not(:first-child) { text-align:right; padding:2px 0 2px 14px; font-variant-numeric:tabular-nums; }
+  .panel thead th:nth-child(2) { color:var(--teamA); } .panel thead th:nth-child(3) { color:var(--teamB); }
+  .split { display:flex; height:5px; margin-top:5px; background:#0006; } .split i { display:block; height:100%; transition:width .3s; } #bara { background:var(--teamA); } #barb { background:var(--teamB); }
+  .swatch { min-width:44px; padding:0 10px; display:inline-flex; align-items:center; gap:6px; } .swatch i { width:14px; height:14px; border:1px solid #fff8; display:inline-block; }
+  @media (prefers-reduced-motion:reduce) { .split i { transition:none; } }
   .stats { background:var(--panel); padding:6px 10px; font-size:12px; color:var(--muted); width:max-content; max-width:80vw; white-space:pre; }
   .bar { position:fixed; right:max(12px,env(safe-area-inset-right)); top:max(12px,env(safe-area-inset-top)); display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; max-width:60vw; }
   button, select { font:600 14px var(--mono); color:var(--paper); background:var(--panel); border:1px solid #6b6455; padding:0 12px; min-height:44px; min-width:44px; cursor:pointer; border-radius:2px; }
@@ -39,7 +45,16 @@
 <canvas id="view"></canvas>
 <div class="hud">
   <div class="title">Britespite<small>spear army battle test</small></div>
-  <div class="tally"><div class="a">Crimson<b id="ca">0</b></div><div class="b">Azure<b id="cb">0</b></div></div>
+  <div class="tally"><div class="a"><span id="na">Crimson</span><b id="ca">0</b></div><div class="b"><span id="nb">Azure</span><b id="cb">0</b></div></div>
+  <div class="panel" id="panel" hidden>
+    <table><thead><tr><th></th><th id="ha">Crimson</th><th id="hb">Azure</th></tr></thead><tbody>
+      <tr><th>Standing</th><td id="sa">0</td><td id="sb">0</td></tr>
+      <tr><th>Kills</th><td id="ka">0</td><td id="kb">0</td></tr>
+      <tr><th>Casualties</th><td id="xa">0</td><td id="xb">0</td></tr>
+      <tr><th>Strength</th><td id="pa">100%</td><td id="pb">100%</td></tr>
+    </tbody></table>
+    <div class="split"><i id="bara"></i><i id="barb"></i></div>
+  </div>
   <div class="stats" id="stats"></div>
 </div>
 <div class="bar">
@@ -47,6 +62,9 @@
   <button id="ff" aria-pressed="false" title="Fast forward (F)">1×</button>
   <button id="mute" aria-pressed="true" title="Sound (M)">Sound off</button>
   <select id="size" aria-label="Army size per side"></select>
+  <button id="statsBtn" aria-pressed="true" title="Battle stats (T)">Stats</button>
+  <button id="colA" class="swatch" title="Change left army colour"><i id="swA"></i>L</button>
+  <button id="colB" class="swatch" title="Change right army colour"><i id="swB"></i>R</button>
   <button id="restart" title="Restart (R)">Restart</button>
   <button id="help" title="Help (H)">?</button>
 </div>

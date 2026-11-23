@@ -6,6 +6,7 @@ import { Battlefield } from './render.js';
 import { FlyCam } from './controls.js';
 import { BattleAudio } from './audio.js';
 import { heightAt } from './terrain.js';
+import { Standards } from './banners.js';
 
 applyTheme();
 const $ = (id) => document.getElementById(id);
@@ -27,17 +28,28 @@ const audio = new BattleAudio();
 const G = (window.__GAME__ = { paused: false, fps: 0, frame: 0, errors: [] });
 addEventListener('error', (e) => G.errors.push(String(e.message)));
 
-let sim, battle;
+let sim, battle, flags;
+// army colours: index into THEME.palette, remembered between visits
+const pal = THEME.palette; let ci = [0, 1];
+try { const v = JSON.parse(localStorage.getItem('bs-colors')); if (Array.isArray(v) && v.length === 2 && v.every((i) => pal[i])) ci = v; } catch (e) {}
+const cols = () => ci.map((i) => pal[i].c);
+function applyColors() {
+  const [a, b] = cols(); if (battle) battle.setTeamColors(a, b); if (flags) flags.setColors([a, b]);
+  const r = document.documentElement.style; r.setProperty('--teamA', a); r.setProperty('--teamB', b);
+  $('swA').style.background = a; $('swB').style.background = b; $('na').textContent = $('ha').textContent = pal[ci[0]].n; $('nb').textContent = $('hb').textContent = pal[ci[1]].n;
+  try { localStorage.setItem('bs-colors', JSON.stringify(ci)); } catch (e) {}
+}
+function cycle(side) { let n = ci[side]; do n = (n + 1) % pal.length; while (n === ci[1 - side]); ci[side] = n; applyColors(); }
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
 let starting = 0;
 async function start(n) {
   perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
-  scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1 };
+  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1 };
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
   const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim);
-  battle.setQuality(coarse ? 0.35 : 1);
+  battle.setQuality(coarse ? 0.35 : 1); flags = new Standards(scene, sim, cols(), reduced); applyColors();
   G.sim = sim; G.battle = battle; if (sim.setSpeed) sim.setSpeed(speed); $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
   G.view = { front: [w * 0.08, 9, rz, 0, 3, 90], over: [0, Math.max(50, w * 0.5), rz - w * 0.25, 0, 0, 60], ground: [-w * 0.5 + 8, 2.0, -86, -w * 0.5 + 40, 2.2, -82] };
@@ -60,7 +72,11 @@ sel.addEventListener('change', () => start(+sel.value));
 const pauseBtn = $('pause'), muteBtn = $('mute');
 function setPaused(p) { G.paused = p; audio.setPaused(p); if (sim && sim.setPaused) sim.setPaused(p); pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
 function setMuted(m) { audio.setMuted(m); muteBtn.setAttribute('aria-pressed', m); muteBtn.textContent = m ? 'Sound off' : 'Sound on'; }
-pauseBtn.onclick = () => setPaused(!G.paused); muteBtn.onclick = () => setMuted(!audio.muted); $('restart').onclick = () => start(perSide);
+pauseBtn.onclick = () => setPaused(!G.paused); muteBtn.onclick = () => setMuted(!audio.muted); $('colA').onclick = () => cycle(0); $('colB').onclick = () => cycle(1);
+const panel = $('panel'), statsBtn = $('statsBtn'); let showStats = true;
+function setStats(v) { showStats = v; panel.hidden = !v; statsBtn.setAttribute('aria-pressed', v); }
+statsBtn.onclick = () => setStats(!showStats); setStats(true);
+$('restart').onclick = () => start(perSide);
 const SPEEDS = [1, 2, 4, 8], ffBtn = $('ff'); let speed = 1;
 function setSpeed(v) { speed = v; ffBtn.textContent = v + '×'; ffBtn.setAttribute('aria-pressed', v > 1); if (sim && sim.setSpeed) sim.setSpeed(v); G.speed = v; }
 ffBtn.onclick = () => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]);
@@ -73,7 +89,7 @@ $('help').onclick = () => { setCam('front'); showTut(0); tutT = 0; };
 showTut(0); let tutT = 0, tutMoved = false;
 addEventListener('keydown', (e) => {
   audio.start(); if (e.repeat) return;
-  if (e.code === 'KeyP') setPaused(!G.paused); else if (e.code === 'KeyF') ffBtn.click(); else if (e.code === 'KeyM') setMuted(!audio.muted); else if (e.code === 'KeyR') start(perSide); else if (e.code === 'KeyH') $('help').click();
+  if (e.code === 'KeyP') setPaused(!G.paused); else if (e.code === 'KeyF') ffBtn.click(); else if (e.code === 'KeyM') setMuted(!audio.muted); else if (e.code === 'KeyT') setStats(!showStats); else if (e.code === 'KeyR') start(perSide); else if (e.code === 'KeyH') $('help').click();
   else if (e.code === 'Digit1') setCam('front'); else if (e.code === 'Digit2') setCam('over'); else if (e.code === 'Digit3') setCam('ground');
 });
 addEventListener('pointerdown', () => { if (!audio.ctx && !audio.muted) audio.start(); }, { once: false });
@@ -86,7 +102,7 @@ function frame(now) {
   runSweep(dt); fly.update(dt); if (!sim) return;
   let alpha = 0;
   if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
-  battle.update(camera, alpha);
+  battle.update(camera, alpha); if (flags) { flags.update(dt, now / 1000); }
   renderer.render(scene, camera);
   fAcc += dt; fN++;
   if (fAcc > 0.5) { G.fps = fN / fAcc; fAcc = 0; fN = 0; adapt(); }
@@ -108,7 +124,12 @@ function adapt() {
 function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
   const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
-  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = w === 0 ? 'Crimson holds the field' : 'Azure holds the field'; }
+  if (flags) flags.refresh(false);
+  const al = sim.alive, de = sim.deaths, P = sim.perSide, t = (id, v) => ($(id).textContent = v.toLocaleString());
+  t('sa', al[0]); t('sb', al[1]); t('ka', de[1]); t('kb', de[0]); t('xa', de[0]); t('xb', de[1]);
+  $('pa').textContent = Math.round((al[0] / P) * 100) + '%'; $('pb').textContent = Math.round((al[1] / P) * 100) + '%';
+  const tot = al[0] + al[1] || 1; $('bara').style.width = (al[0] / tot) * 100 + '%'; $('barb').style.width = (al[1] / tot) * 100 + '%';
+  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = `${pal[ci[w]].n} holds the field`; }
 }
 G.step = (ticks = 1) => { if (!G.worker) for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
 G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };
