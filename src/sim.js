@@ -3,6 +3,7 @@ import { CLIP, CLIPS } from './clips.js';
 
 export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
 const MR = 2, ROUT_AT = 0.16, RALLY_AT = 0.5, CELL = 2, REACH = 2.3, SEP = 0.9, AGGRO = 26, TICK = 0.05;
+export const ORD = { NONE: 0, ADVANCE: 1, HOLD: 2, FLANK: 3 };
 const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CLIPS[CLIP.ATTACK].hit;
 
 function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -17,11 +18,11 @@ export class Sim {
     this.yaw = A(Float32Array, n); this.hp = A(Float32Array, n); this.stateT = A(Float32Array, n); this.cd = A(Float32Array, n);
     this.animT = A(Float32Array, n); this.prevT = A(Float32Array, n); this.blend = A(Float32Array, n).fill(1);
     this.spd = A(Float32Array, n); this.team = A(Uint8Array, n); this.state = A(Uint8Array, n); this.clip = A(Uint8Array, n);
-    this.prevClip = A(Uint8Array, n); this.removed = A(Uint8Array, n); this.hitDone = A(Uint8Array, n); this.seed = A(Float32Array, n);
+    this.ord = A(Uint8Array, n); this.ox = A(Float32Array, n); this.oz = A(Float32Array, n); this.prevClip = A(Uint8Array, n); this.removed = A(Uint8Array, n); this.hitDone = A(Uint8Array, n); this.seed = A(Float32Array, n);
     this.tgt = A(Int32Array, n).fill(-1); this.deadQ = []; this.deadHead = 0;
     this.alive = A(Int32Array, 2); this.alive[0] = this.alive[1] = perSide; this.deaths = A(Int32Array, 2);
     this.meta = A(Float64Array, 4); this.hits = 0; this.hitEvents = []; // {x,z,kill}
-    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','alive','deaths','meta'];
+    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n);
     this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0]; this.over = -1; // over: -1 running, else winning team
     // morale (sim-internal, not shared): 1 = steady, below ROUT_AT the unit breaks and runs
@@ -125,6 +126,18 @@ export class Sim {
       const dx = this.x[j] - this.x[from], dz = this.z[j] - this.z[from], l = Math.hypot(dx, dz) || 1; this.vx[j] = (dx / l) * 1.5; this.vz[j] = (dz / l) * 1.5;
     }
   }
+  /** Commander order for a group of soldiers. (x,z) is the group's destination centre; each soldier keeps its offset from the group centroid. */
+  command(ids, kind, x = 0, z = 0) {
+    let cx = 0, cz = 0, m = 0;
+    for (let k = 0; k < ids.length; k++) { const i = ids[k]; if (i < 0 || i >= this.n || this.state[i] === ST.DEAD || this.removed[i]) continue; cx += this.x[i]; cz += this.z[i]; m++; }
+    if (!m) return 0; cx /= m; cz /= m;
+    for (let k = 0; k < ids.length; k++) {
+      const i = ids[k]; if (i < 0 || i >= this.n || this.state[i] === ST.DEAD || this.removed[i]) continue;
+      this.ord[i] = kind; this.ox[i] = x + (this.x[i] - cx); this.oz[i] = z + (this.z[i] - cz);
+      if (kind === ORD.HOLD) { this.ox[i] = this.x[i]; this.oz[i] = this.z[i]; }
+    }
+    return m;
+  }
   /** advance by real dt (fixed 20 Hz internal ticks) */
   advance(dt, speed = 1) { this.acc += dt * speed; const cap = 4 * Math.ceil(speed); let k = 0; while (this.acc >= TICK && k < cap) { this.tick(TICK); this.acc -= TICK; k++; } if (k === cap) this.acc = 0; return this.acc / TICK; }
   tick(dt) {
@@ -161,7 +174,24 @@ export class Sim {
           const ahead = (me === 0 ? this.frontZ[1] - z[i] : z[i] - this.frontZ[0]);
           j = ahead > AGGRO ? -1 : this.nearestEnemy(i); tgt[i] = j;
         }
-        if (j >= 0) {
+        const o = this.ord[i];
+        if (o !== ORD.NONE) {
+          // commanded: fight only what is near, otherwise obey the order
+          const ex = j >= 0 ? x[j] - x[i] : 0, ez = j >= 0 ? z[j] - z[i] : 0, d = j >= 0 ? Math.hypot(ex, ez) : 1e9;
+          const engage = o === ORD.HOLD ? REACH * 1.4 : o === ORD.ADVANCE ? 9 : REACH * 1.05;
+          if (d < engage) {
+            this.turn(i, Math.atan2(ex, ez), dt, 7);
+            if (d < REACH * 0.92) { if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; } }
+            else { sp = 1.6; desX = ex / d; desZ = ez / d; }
+          } else if (o === ORD.HOLD) {
+            const hx = this.ox[i] - x[i], hz = this.oz[i] - z[i], hd = Math.hypot(hx, hz);
+            if (hd > 1.2) { sp = 1.4; desX = hx / hd; desZ = hz / hd; this.turn(i, Math.atan2(hx, hz), dt, 6); } else if (j >= 0 && d < 40) this.turn(i, Math.atan2(ex, ez), dt, 3);
+          } else {
+            const px = this.ox[i] - x[i], pz = this.oz[i] - z[i], pd = Math.hypot(px, pz);
+            if (pd < 2.5) { this.ord[i] = o === ORD.FLANK ? ORD.NONE : ORD.HOLD; this.ox[i] = x[i]; this.oz[i] = z[i]; }
+            else { sp = pd > 7 ? 3.4 : 1.6; desX = px / pd; desZ = pz / pd; this.turn(i, Math.atan2(px, pz), dt, 6); }
+          }
+        } else if (j >= 0) {
           const ex = x[j] - x[i], ez = z[j] - z[i], d = Math.hypot(ex, ez);
           this.turn(i, Math.atan2(ex, ez), dt, 7);
           if (d < REACH * 0.92) { sp = 0; if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; } }

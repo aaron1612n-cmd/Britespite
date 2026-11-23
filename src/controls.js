@@ -4,30 +4,32 @@ import { heightAt } from './terrain.js';
 export class FlyCam {
   constructor(camera, dom) {
     this.cam = camera; this.dom = dom; this.pos = camera.position; this.yaw = 0; this.pitch = 0; this.vel = new THREE.Vector3();
-    this.keys = new Set(); this.stick = { x: 0, y: 0 }; this.climb = 0; this.fast = false; this.speed = 40; this.moved = false; this.locked = false; this.input = false;
+    this.keys = new Set(); this.stick = { x: 0, y: 0 }; this.climb = 0; this.fast = false; this.speed = 40; this.moved = false; this.locked = false; this.input = false; this.cmd = false; this.onCmd = null;
     const d = dom, kb = (e, down) => { const k = e.code; if (['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','Space','KeyC','ShiftLeft','ShiftRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','ControlLeft'].includes(k)) { down ? this.keys.add(k) : this.keys.delete(k); if (down) this.touch(); e.preventDefault(); } };
     addEventListener('keydown', (e) => kb(e, true)); addEventListener('keyup', (e) => kb(e, false)); addEventListener('blur', () => this.keys.clear());
     d.addEventListener('wheel', (e) => { this.speed = Math.min(400, Math.max(5, this.speed * (e.deltaY < 0 ? 1.15 : 0.87))); this.touch(); e.preventDefault(); }, { passive: false });
-    d.addEventListener('click', () => { if (matchMedia('(pointer:fine)').matches && d.requestPointerLock) d.requestPointerLock(); });
+    d.addEventListener('click', () => { if (!this.cmd && matchMedia('(pointer:fine)').matches && d.requestPointerLock) d.requestPointerLock(); });
     document.addEventListener('pointerlockchange', () => { this.locked = document.pointerLockElement === d; });
     this.ptr = new Map(); const stickEl = document.getElementById('stick'), knob = document.getElementById('knob');
-    d.addEventListener('pointerdown', (e) => { d.setPointerCapture(e.pointerId); this.ptr.set(e.pointerId, { x: e.clientX, y: e.clientY, mode: e.pointerType === 'touch' ? 'look' : 'drag' }); });
+    d.addEventListener('pointerdown', (e) => { if (this.cmd) { d.setPointerCapture(e.pointerId); this.onCmd && this.onCmd('down', e); return; } d.setPointerCapture(e.pointerId); this.ptr.set(e.pointerId, { x: e.clientX, y: e.clientY, mode: e.pointerType === 'touch' ? 'look' : 'drag' }); });
     stickEl.addEventListener('pointerdown', (e) => { e.stopPropagation(); stickEl.setPointerCapture(e.pointerId); this.ptr.set(e.pointerId, { mode: 'stick' }); this.stickMove(e, stickEl, knob); });
     stickEl.addEventListener('pointermove', (e) => { const p = this.ptr.get(e.pointerId); if (p && p.mode === 'stick') this.stickMove(e, stickEl, knob); });
     const endS = (e) => { if (this.ptr.get(e.pointerId)?.mode === 'stick') { this.ptr.delete(e.pointerId); this.stick.x = this.stick.y = 0; knob.style.transform = ''; } };
     stickEl.addEventListener('pointerup', endS); stickEl.addEventListener('pointercancel', endS);
     d.addEventListener('pointermove', (e) => {
+      if (this.cmd) { this.onCmd && this.onCmd('move', e); return; }
       if (this.locked) { this.look(e.movementX, e.movementY, 0.0022); return; }
       const p = this.ptr.get(e.pointerId); if (!p) return; if (p.mode === 'drag' && !(e.buttons & 1) && !(e.buttons & 2)) return;
       this.look(e.clientX - p.x, e.clientY - p.y, p.mode === 'look' ? 0.0045 : 0.0035); p.x = e.clientX; p.y = e.clientY;
     });
-    const end = (e) => this.ptr.delete(e.pointerId); d.addEventListener('pointerup', end); d.addEventListener('pointercancel', end);
+    const end = (e) => { if (this.cmd) { this.onCmd && this.onCmd(e.type === 'pointerup' ? 'up' : 'cancel', e); return; } this.ptr.delete(e.pointerId); }; d.addEventListener('pointerup', end); d.addEventListener('pointercancel', end);
     d.addEventListener('contextmenu', (e) => e.preventDefault());
     const hold = (id, on, off) => { const el = document.getElementById(id); el.addEventListener('pointerdown', (e) => { e.stopPropagation(); el.setPointerCapture(e.pointerId); on(el); this.touch(); }); const u = () => off(el); el.addEventListener('pointerup', u); el.addEventListener('pointercancel', u); };
     hold('up', () => (this.climb = 1), () => (this.climb = 0)); hold('down', () => (this.climb = -1), () => (this.climb = 0));
     const fb = document.getElementById('fast'); fb.addEventListener('click', () => { this.fast = !this.fast; fb.setAttribute('aria-pressed', this.fast); });
     this.apply();
   }
+  setCmd(on) { this.cmd = on; this.ptr.clear(); if (on && document.pointerLockElement) document.exitPointerLock(); }
   touch() { this.input = true; }
   stickMove(e, el, knob) { const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2; let x = (e.clientX - cx) / (r.width / 2), y = (e.clientY - cy) / (r.height / 2); const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; } this.stick.x = x; this.stick.y = y; knob.style.transform = `translate(${x * 38}px,${y * 38}px)`; this.touch(); }
   look(dx, dy, k) { this.yaw -= dx * k; this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - dy * k)); this.touch(); }

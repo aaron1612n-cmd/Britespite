@@ -5,7 +5,7 @@ import { buildSoldier, SHIELD_PLANE_Y } from '../src/model.js';
 import { bakeAll, skinVertices } from '../src/rig.js';
 import { NB, BONES } from '../src/skeleton.js';
 import { CLIPS, CLIP } from '../src/clips.js';
-import { Sim, ST } from '../src/sim.js';
+import { Sim, ST, ORD } from '../src/sim.js';
 
 let fails = 0, passes = 0;
 const check = (name, ok, info = '') => { ok ? passes++ : fails++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  ' + info : ''}`); };
@@ -110,5 +110,17 @@ try {
   check('fast-forward button cycles 1x/2x/4x/8x', ff[0] === '2×' && ff[1] === '1×', ff.join(' -> '));
   const t0 = await page.evaluate(() => { const G = window.__GAME__, a = performance.now(); for (let i = 0; i < 10; i++) G.draw(); return (performance.now() - a) / 10; });
   console.log(`INFO  software-GL frame cost ${t0.toFixed(0)} ms (CPU submit only, headless software GL; real FPS needs a GPU)`);
-} finally { await browser.close(); srv.kill(); }
+} finally { await browser.close(); srv.kill(); }{ // commander orders
+  const mk = () => new Sim({ perSide: 400, seed: 3 }), ids = (s) => Array.from({ length: 100 }, (_, i) => i);
+  const a = mk(); const ids0 = ids(a); const cz0 = ids0.reduce((q, i) => q + a.z[i], 0) / 100;
+  a.command(ids0, ORD.ADVANCE, 0, cz0 + 40); for (let k = 0; k < 400; k++) a.tick(a.TICK);
+  const cz1 = ids0.reduce((q, i) => q + a.z[i], 0) / 100; check('advance order moves the group forward', cz1 > cz0 + 25, `${cz0.toFixed(1)} -> ${cz1.toFixed(1)}`);
+  check('group reverts to hold on arrival', ids0.filter((i) => a.ord[i] === ORD.HOLD).length > 80);
+  const b = mk(); b.command(ids0, ORD.HOLD); const x0 = ids0.map((i) => b.x[i]), z0 = ids0.map((i) => b.z[i]);
+  for (let k = 0; k < 300; k++) b.tick(b.TICK); let drift = 0; ids0.forEach((i, k) => { drift = Math.max(drift, Math.hypot(b.x[i] - x0[k], b.z[i] - z0[k])); });
+  check('hold order keeps soldiers in place', drift < 6, `max drift ${drift.toFixed(1)} m`);
+  const f = mk(); const fx0 = ids0.reduce((q, i) => q + f.x[i], 0) / 100; f.command(ids0, ORD.FLANK, fx0 + 60, cz0 + 40); for (let k = 0; k < 500; k++) f.tick(f.TICK);
+  const fx1 = ids0.reduce((q, i) => q + f.x[i], 0) / 100; check('flank order swings the group sideways', fx1 > fx0 + 40, `${fx0.toFixed(1)} -> ${fx1.toFixed(1)}`);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`); process.exit(fails ? 1 : 0);

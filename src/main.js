@@ -7,6 +7,7 @@ import { FlyCam } from './controls.js';
 import { BattleAudio } from './audio.js';
 import { heightAt } from './terrain.js';
 import { Standards } from './banners.js';
+import { Commander } from './command.js';
 
 applyTheme();
 const $ = (id) => document.getElementById(id);
@@ -40,6 +41,8 @@ function applyColors() {
   try { localStorage.setItem('bs-colors', JSON.stringify(ci)); } catch (e) {}
 }
 function cycle(side) { let n = ci[side]; do n = (n + 1) % pal.length; while (n === ci[1 - side]); ci[side] = n; applyColors(); }
+const cmdr = new Commander({ camera, canvas, fly, getSim: () => sim, onMode: (on) => { if (on) hint.classList.add('off'); } });
+G.cmdr = cmdr;
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
@@ -48,7 +51,7 @@ async function start(n) {
   perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
   if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1 };
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
-  const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim);
+  const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; cmdr.ids = []; cmdr.dest = null; cmdr.refresh(); audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim);
   battle.setQuality(coarse ? 0.35 : 1); flags = new Standards(scene, sim, cols(), reduced); applyColors();
   G.sim = sim; G.battle = battle; if (sim.setSpeed) sim.setSpeed(speed); $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
@@ -83,7 +86,7 @@ ffBtn.onclick = () => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.lengt
 const hint = $('hint'); let tut = 0;
 const TUT = coarse
   ? ['Left pad: fly. Drag anywhere else: look.', '▲ ▼ change height. » is turbo.', '» is turbo. 1× / 2× speeds up the battle. Fly down to the front line.']
-  : ['Click to look around. WASD flies, Space / C up and down.', 'Shift is turbo. Mouse wheel changes speed.', 'Keys 1, 2, 3 jump to the field. F fast-forwards, P pauses, M sound.'];
+  : ['Click to look around. WASD flies, Space / C up and down.', 'Shift is turbo. Mouse wheel changes speed.', 'Keys 1, 2, 3 jump to the field. Tab opens Command mode. F fast-forwards, P pauses, M sound.'];
 function showTut(i) { tut = i; if (i >= TUT.length) { hint.classList.add('off'); return; } hint.textContent = TUT[i]; hint.classList.remove('off'); }
 $('help').onclick = () => { setCam('front'); showTut(0); tutT = 0; };
 showTut(0); let tutT = 0, tutMoved = false;
@@ -103,10 +106,11 @@ function frame(now) {
   let alpha = 0;
   if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
   battle.update(camera, alpha); if (flags) { flags.update(dt, now / 1000); }
+  cmdr.draw(reduced);
   renderer.render(scene, camera);
   fAcc += dt; fN++;
   if (fAcc > 0.5) { G.fps = fN / fAcc; fAcc = 0; fN = 0; adapt(); }
-  if ((statT += dt) > 0.25) { statT = 0; hud(); }
+  if ((statT += dt) > 0.25) { statT = 0; hud(); cmdr.tick(); }
   // audio
   if (audio.ctx && !audio.muted && !G.paused) {
     const hs = sim.hitEvents; ev = ev * 0.97 + hs.length * 0.03; // smoothed fight rate

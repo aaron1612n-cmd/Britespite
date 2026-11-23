@@ -13,5 +13,6 @@ onmessage = (e) => {
     postMessage({ type: 'ready', n: sim.n, world: sim.world, perSide: sim.perSide, bufs });
     next = performance.now(); loop();
   } else if (m.type === 'pause') paused = m.v;
+  else if (m.type === 'order') sim.command(m.ids, m.kind, m.x, m.z);
   else if (m.type === 'speed') speed = m.v;
 };
