@@ -5,56 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <title>Britespite</title>
 <meta name="description" content="Britespite: a free-camera spear army battle test.">
-<style>
-  :root { --accent:#d8a63a; --ink:#14120f; --paper:#f2ecde; --muted:#b9b09b; --panel:rgba(20,18,15,.82); --teamA:#b3352b; --teamB:#2f5f9a;
-    --display:"Rockwell","Roboto Slab",Georgia,serif; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { margin:0; height:100%; background:#8fa3ab; overflow:hidden; font-family:var(--mono); color:var(--paper); touch-action:none; user-select:none; -webkit-user-select:none; }
-  canvas#view { position:fixed; inset:0; width:100%; height:100%; display:block; }
-  .hud { position:fixed; left:max(12px,env(safe-area-inset-left)); top:max(12px,env(safe-area-inset-top)); display:flex; flex-direction:column; gap:8px; pointer-events:none; }
-  .title { font:700 22px/1 var(--display); letter-spacing:.02em; text-shadow:0 1px 3px #000a; }
-  .title small { display:block; font:400 12px var(--mono); color:var(--paper); opacity:.9; margin-top:4px; }
-  .tally { display:flex; gap:8px; }
-  .tally div { background:var(--panel); padding:6px 10px; border-left:5px solid; font-size:14px; min-width:96px; }
-  .tally .a { border-color:var(--teamA); } .tally .b { border-color:var(--teamB); }
-  .tally b { font-size:18px; display:block; }
-  .panel { background:var(--panel); padding:6px 10px; font-size:12px; width:max-content; max-width:80vw; }
-  .panel table { border-collapse:collapse; } .panel th { font-weight:400; color:var(--muted); text-align:left; padding:2px 10px 2px 0; } .panel td, .panel thead th:not(:first-child) { text-align:right; padding:2px 0 2px 14px; font-variant-numeric:tabular-nums; }
-  .panel thead th:nth-child(2) { color:var(--teamA); } .panel thead th:nth-child(3) { color:var(--teamB); }
-  .split { display:flex; height:5px; margin-top:5px; background:#0006; } .split i { display:block; height:100%; transition:width .3s; } #bara { background:var(--teamA); } #barb { background:var(--teamB); }
-  .swatch { min-width:44px; padding:0 10px; display:inline-flex; align-items:center; gap:6px; } .swatch i { width:14px; height:14px; border:1px solid #fff8; display:inline-block; }
-  @media (prefers-reduced-motion:reduce) { .split i { transition:none; } }
-  .stats { background:var(--panel); padding:6px 10px; font-size:12px; color:var(--muted); width:max-content; max-width:80vw; white-space:pre; }
-  .camstat { display:none; align-items:center; gap:6px; flex-wrap:wrap; pointer-events:auto; background:var(--panel); border-left:5px solid var(--accent); padding:4px 4px 4px 10px; font-size:13px; max-width:88vw; }
-  .camstat button { min-height:44px; font-size:13px; }
-  .bar { position:fixed; right:max(12px,env(safe-area-inset-right)); top:max(12px,env(safe-area-inset-top)); display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; max-width:60vw; }
-  button, select { font:600 14px var(--mono); color:var(--paper); background:var(--panel); border:1px solid #6b6455; padding:0 12px; min-height:44px; min-width:44px; cursor:pointer; border-radius:2px; }
-  button:hover, select:hover { border-color:var(--accent); }
-  button:focus-visible, select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
-  button[aria-pressed="true"] { background:var(--accent); color:var(--ink); border-color:var(--accent); }
-  .hint { position:fixed; left:50%; bottom:max(20px,env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--panel); border-top:3px solid var(--accent); padding:12px 16px; font-size:15px; max-width:min(520px,92vw); text-align:center; transition:opacity .6s; }
-  .hint.off { opacity:0; pointer-events:none; }
-  .banner { position:fixed; left:50%; top:30%; transform:translate(-50%,-50%); font:700 clamp(28px,6vw,56px) var(--display); text-shadow:0 2px 8px #000b; display:none; text-align:center; }
-  .stick { position:fixed; left:max(18px,env(safe-area-inset-left)); bottom:max(22px,env(safe-area-inset-bottom)); width:132px; height:132px; border-radius:50%; border:2px solid #f2ecde88; background:#14120f55; display:none; }
-  .stick i { position:absolute; left:50%; top:50%; width:56px; height:56px; margin:-28px; border-radius:50%; background:#f2ecdecc; }
-  .pad { position:fixed; right:max(18px,env(safe-area-inset-right)); bottom:max(22px,env(safe-area-inset-bottom)); display:none; flex-direction:column; gap:8px; }
-  .pad button { min-width:60px; min-height:60px; font-size:20px; }
-  #cmdfx { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; display:none; }
-  .cmd { position:fixed; left:50%; bottom:max(20px,env(safe-area-inset-bottom)); transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:8px; width:max-content; max-width:calc(100vw - 24px); }
-  .cmd[hidden] { display:none; }
-  .cmd .row { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
-  .cmd button { min-height:48px; padding:0 14px; } .cmd button kbd { font:400 11px var(--mono); opacity:.7; margin-left:6px; } .cmd button:disabled { opacity:.4; cursor:default; }
-  .cmdlabel { background:var(--panel); border-top:3px solid var(--accent); padding:8px 14px; font-size:14px; text-align:center; max-width:92vw; } .cmdlabel b { color:var(--accent); }
-  @media (pointer:coarse) { .cmd { bottom:max(170px,calc(env(safe-area-inset-bottom) + 160px)); } .cmd kbd { display:none; } }
-  @media (pointer:coarse) { .stick { display:block; } .pad { display:flex; } .keys { display:none; } .hint { bottom:180px; } }
-  @media (max-width:520px) { .bar { max-width:100%; left:12px; right:12px; top:auto; bottom:auto; margin-top:150px; justify-content:flex-start; } .tally div { min-width:80px; } }
-</style>
+
 </head>
 <body>
 <canvas id="view"></canvas>
 <div class="hud">
-  <div class="title">Britespite<small>spear army battle test</small></div>
-  <div class="tally"><div class="a"><span id="na">Crimson</span><b id="ca">0</b></div><div class="b"><span id="nb">Azure</span><b id="cb">0</b></div></div>
+  <header class="title"><h1>Britespite</h1><span>Spear armies, free camera</span></header>
+  <section class="ledger" aria-label="Battle score">
+    <div class="side a"><span id="na">Crimson</span><b id="ca">0</b></div>
+    <div class="side b"><span id="nb">Azure</span><b id="cb">0</b></div>
+  </section>
   <div class="panel" id="panel" hidden>
     <table><thead><tr><th></th><th id="ha">Crimson</th><th id="hb">Azure</th></tr></thead><tbody>
       <tr><th>Standing</th><td id="sa">0</td><td id="sb">0</td></tr>
@@ -67,26 +27,39 @@
   <div class="camstat" id="camstat"><span id="ctext"></span><button id="cview"></button><button id="cspeed"></button><button id="cfree">Free cam</button></div>
   <div class="stats" id="stats"></div>
 </div>
-<div class="bar">
-  <button id="cmdtoggle" aria-pressed="false" title="Command mode (Tab)">Command</button>
-  <button id="cine" aria-pressed="false" title="Cinematic camera (K)">Cinema</button>
-  <button id="replay" aria-pressed="false" title="Replay last seconds (Y)">Replay</button>
-  <button id="pause" aria-pressed="false" title="Pause (P)">Pause</button>
-  <button id="ff" aria-pressed="false" title="Fast forward (F)">1×</button>
-  <button id="mute" aria-pressed="true" title="Sound (M)">Sound off</button>
-  <select id="mode" aria-label="Scenario"><option value="open">Open field</option><option value="siege">Siege</option></select>
-  <select id="size" aria-label="Army size per side"></select>
-  <select id="fa" aria-label="Left army formation"></select>
-  <select id="fb" aria-label="Right army formation"></select>
-  <button id="statsBtn" aria-pressed="true" title="Battle stats (T)">Stats</button>
-  <button id="colA" class="swatch" title="Change left army colour"><i id="swA"></i>L</button>
-  <button id="colB" class="swatch" title="Change right army colour"><i id="swB"></i>R</button>
-  <select id="terrain" aria-label="Terrain"></select>
-  <select id="weather" aria-label="Weather"></select>
-  <select id="time" aria-label="Time of day"></select>
-  <button id="restart" title="Restart (R)">Restart</button>
-  <button id="help" title="Help (H)">?</button>
-</div>
+<nav class="bar" aria-label="Controls">
+  <div class="group">
+    <button id="cmdtoggle" aria-pressed="false" title="Command mode (Tab)">Command</button>
+    <button id="cine" aria-pressed="false" title="Cinematic camera (K)">Cinema</button>
+    <button id="replay" aria-pressed="false" title="Replay last seconds (Y)">Replay</button>
+  </div>
+  <div class="group">
+    <button id="pause" aria-pressed="false" title="Pause (P)">Pause</button>
+    <button id="ff" aria-pressed="false" title="Fast forward (F)">1×</button>
+    <button id="mute" aria-pressed="true" title="Sound (M)">Sound off</button>
+  </div>
+  <div class="group">
+    <button id="setupBtn" aria-pressed="false" aria-expanded="false" aria-controls="setup" title="Battle setup">Setup</button>
+    <button id="help" title="Help (H)" aria-label="Help">?</button>
+  </div>
+  <div class="setup" id="setup" hidden>
+    <fieldset><legend>Battle</legend>
+      <label>Scenario<select id="mode" aria-label="Scenario"><option value="open">Open field</option><option value="siege">Siege</option></select></label>
+      <label>Army size<select id="size" aria-label="Army size per side"></select></label>
+      <label>Left formation<select id="fa" aria-label="Left army formation"></select></label>
+      <label>Right formation<select id="fb" aria-label="Right army formation"></select></label>
+      <label>Left troops<select id="ma" aria-label="Left army troops"></select></label>
+      <label>Right troops<select id="mb" aria-label="Right army troops"></select></label>
+      <div class="colours"><span>Colours</span><button id="colA" class="swatch" title="Change left army colour"><i id="swA"></i>Left</button><button id="colB" class="swatch" title="Change right army colour"><i id="swB"></i>Right</button></div>
+    </fieldset>
+    <fieldset><legend>Field</legend>
+      <label>Terrain<select id="terrain" aria-label="Terrain"></select></label>
+      <label>Weather<select id="weather" aria-label="Weather"></select></label>
+      <label>Time of day<select id="time" aria-label="Time of day"></select></label>
+    </fieldset>
+    <div class="actions"><button id="statsBtn" aria-pressed="true" title="Battle stats (T)">Stats</button><button id="restart" title="Restart (R)">Restart</button></div>
+  </div>
+</nav>
 <canvas id="cmdfx"></canvas>
 <div class="cmd" id="cmd" hidden>
   <div class="cmdlabel"><b id="cmdcount">0</b> <span id="cmdlabel"></span></div>

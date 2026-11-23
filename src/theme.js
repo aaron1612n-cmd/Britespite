@@ -4,7 +4,7 @@ export const THEME = {
   ink: '#14120f',
   paper: '#f2ecde',
   muted: '#b9b09b',
-  panel: 'rgba(20,18,15,0.82)',
+  panel: '#1c1915',
   teamA: '#b3352b', // crimson army
   teamB: '#2f5f9a', // blue army
   // choosable army colours (first two are the defaults); picker cycles through these

@@ -19,4 +19,4 @@ export const BONES = [
 ];
 export const NB = BONES.length;
 export const THIGH_LEN = 0.46, SHIN_LEN = 0.44, ANKLE_Y = 0.08;
-export const MAT = { SKIN: 0, TUNIC: 1, BRONZE: 2, WOOD: 3, LEATHER: 4, ACCENT: 5, EYE: 6, HAIR: 7, TAN: 8 };
+export const MAT = { SKIN: 0, TUNIC: 1, BRONZE: 2, WOOD: 3, LEATHER: 4, ACCENT: 5, EYE: 6, HAIR: 7, TAN: 8, GOLD: 9 };

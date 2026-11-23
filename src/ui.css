@@ -1,0 +1,82 @@
+/* Britespite UI. Look: a campaign ledger. Flat dark-ink slabs, ruled lines, one brass accent.
+   Colours and fonts come from the tokens set in theme.js (applyTheme). */
+:root { --accent:#d8a63a; --ink:#14120f; --paper:#f2ecde; --muted:#b9b09b; --panel:#1c1915; --rule:#4a4338; --teamA:#b3352b; --teamB:#2f5f9a;
+  --display:"Rockwell","Roboto Slab",Georgia,serif; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace; --edge:max(12px,env(safe-area-inset-left)); }
+* { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { margin:0; height:100%; background:#8fa3ab; overflow:hidden; font:13px/1.35 var(--mono); color:var(--paper); touch-action:none; user-select:none; -webkit-user-select:none; }
+canvas#view { position:fixed; inset:0; width:100%; height:100%; display:block; }
+h1 { margin:0; font:700 20px/1 var(--display); letter-spacing:.03em; }
+
+.hud { position:fixed; left:var(--edge); top:max(12px,env(safe-area-inset-top)); display:flex; flex-direction:column; gap:6px; pointer-events:none; max-width:calc(100vw - 24px); }
+.title { background:var(--panel); border-bottom:3px solid var(--accent); padding:8px 12px 7px; width:max-content; }
+.title span { display:block; color:var(--muted); font-size:11px; margin-top:3px; }
+.ledger { display:flex; width:max-content; background:var(--panel); }
+.side { padding:5px 14px 5px 10px; border-left:4px solid; min-width:104px; display:flex; flex-direction:column; }
+.side.a { border-color:var(--teamA); } .side.b { border-color:var(--teamB); border-left-width:4px; border-left-style:solid; }
+.side span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+.side b { font:700 22px/1.1 var(--display); font-variant-numeric:tabular-nums; }
+.panel, .stats { background:var(--panel); padding:6px 12px; width:max-content; max-width:100%; }
+.stats { color:var(--muted); white-space:pre; font-size:11px; }
+.panel table { border-collapse:collapse; font-size:12px; }
+.panel th { font-weight:400; color:var(--muted); text-align:left; padding:3px 12px 3px 0; border-top:1px solid var(--rule); }
+.panel thead th { border-top:0; }
+.panel td, .panel thead th:not(:first-child) { text-align:right; padding:3px 0 3px 16px; border-top:1px solid var(--rule); font-variant-numeric:tabular-nums; }
+.panel thead th:not(:first-child) { border-top:0; }
+.panel thead th:nth-child(2) { color:#e0766c; } .panel thead th:nth-child(3) { color:#7ea8dc; }
+.split { display:flex; height:4px; margin-top:6px; background:#000; } .split i { display:block; height:100%; } #bara { background:var(--teamA); } #barb { background:var(--teamB); }
+.camstat { display:none; align-items:center; gap:6px; flex-wrap:wrap; pointer-events:auto; background:var(--panel); border-left:4px solid var(--accent); padding:4px 4px 4px 10px; max-width:88vw; }
+
+/* controls */
+button, select { font:600 13px var(--mono); color:var(--paper); background:var(--panel); border:1px solid var(--rule); padding:0 12px; min-height:44px; min-width:44px; cursor:pointer; border-radius:0; }
+button:hover, select:hover { border-color:var(--accent); }
+button:focus-visible, select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+button[aria-pressed="true"] { background:var(--accent); color:var(--ink); border-color:var(--accent); }
+#mute[aria-pressed="true"] { background:var(--panel); color:var(--muted); border-color:var(--rule); }
+button:disabled { opacity:.45; cursor:default; }
+.bar { position:fixed; right:max(12px,env(safe-area-inset-right)); top:max(12px,env(safe-area-inset-top)); display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; max-width:min(470px,calc(100vw - 24px)); }
+.group { display:flex; border:1px solid var(--rule); background:var(--panel); }
+.group button { border:0; border-right:1px solid var(--rule); } .group button:last-child { border-right:0; }
+.group button[aria-pressed="true"] { border-color:var(--rule); }
+.setup { width:100%; background:var(--panel); border:1px solid var(--rule); border-top:3px solid var(--accent); padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px; max-height:calc(100vh - 80px); overflow:auto; touch-action:pan-y; }
+.setup[hidden] { display:none; }
+.setup fieldset { border:0; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.setup legend { font:700 14px var(--display); color:var(--accent); padding:0; margin-bottom:0; grid-column:1/-1; }
+.setup label, .colours > span { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+.setup select { width:100%; text-transform:none; letter-spacing:0; font-weight:400; font-size:13px; background:var(--ink); color:var(--paper); }
+.setup select[hidden], .setup label:has(select[hidden]) { display:none; }
+.colours { grid-column:1/-1; display:flex; gap:6px; align-items:flex-end; } .colours > span { flex:1; align-self:center; }
+.swatch { display:inline-flex; align-items:center; gap:7px; } .swatch i { width:14px; height:14px; border:1px solid #fff9; display:inline-block; }
+.actions { display:flex; gap:6px; } .actions button { flex:1; }
+
+/* hints, banner, touch */
+.hint { position:fixed; left:50%; bottom:max(20px,env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--panel); border-left:4px solid var(--accent); padding:10px 14px; font-size:14px; max-width:min(520px,92vw); }
+.hint.off { opacity:0; pointer-events:none; }
+.banner { position:fixed; left:50%; top:30%; transform:translate(-50%,-50%); font:700 clamp(28px,6vw,56px) var(--display); text-shadow:0 2px 0 #000, 0 0 12px #000a; display:none; text-align:center; }
+.stick { position:fixed; left:max(18px,env(safe-area-inset-left)); bottom:max(22px,env(safe-area-inset-bottom)); width:132px; height:132px; border-radius:50%; border:2px solid #f2ecdeaa; background:#14120f66; display:none; }
+.stick i { position:absolute; left:50%; top:50%; width:56px; height:56px; margin:-28px; border-radius:50%; background:#f2ecdedd; }
+.pad { position:fixed; right:max(18px,env(safe-area-inset-right)); bottom:max(22px,env(safe-area-inset-bottom)); display:none; flex-direction:column; gap:8px; }
+.pad button { min-width:60px; min-height:60px; font-size:20px; }
+#cmdfx { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; display:none; }
+.cmd { position:fixed; left:50%; bottom:max(20px,env(safe-area-inset-bottom)); transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:6px; width:max-content; max-width:calc(100vw - 24px); }
+.cmd[hidden] { display:none; }
+.cmd .row { display:flex; flex-wrap:wrap; justify-content:center; border:1px solid var(--rule); background:var(--panel); }
+.cmd button { min-height:48px; padding:0 14px; border:0; border-right:1px solid var(--rule); } .cmd button:last-child { border-right:0; }
+.cmd button kbd { font:400 11px var(--mono); opacity:.75; margin-left:6px; }
+.cmdlabel { background:var(--panel); border-left:4px solid var(--accent); padding:7px 12px; font-size:13px; max-width:92vw; } .cmdlabel b { color:var(--accent); }
+
+@media (pointer:coarse) { .stick { display:block; } .pad { display:flex; } .keys { display:none; } .hint { bottom:180px; } .cmd { bottom:max(170px,calc(env(safe-area-inset-bottom) + 160px)); } .cmd kbd { display:none; } }
+@media (max-width:640px) {
+  .bar { top:auto; bottom:max(10px,env(safe-area-inset-bottom)); right:12px; left:12px; max-width:none; gap:0; border:1px solid var(--rule); background:var(--panel); }
+  .bar .group { display:contents; }
+  .bar button { flex:1 1 25%; padding:0 4px; border:0; border-right:1px solid var(--rule); border-bottom:1px solid var(--rule); }
+  .setup { position:fixed; z-index:5; inset:8px 8px auto 8px; width:auto; max-height:calc(100vh - 16px); }
+  .side { min-width:84px; } .stats { display:none; }
+}
+@media (max-width:640px) and (pointer:coarse) { .stick, .pad { bottom:calc(max(10px,env(safe-area-inset-bottom)) + 110px); } .hint { bottom:260px; } .cmd { bottom:270px; } }
+
+/* the one motion moment: the setup drawer drops in. everything else is instant */
+@media (prefers-reduced-motion:no-preference) {
+  .setup:not([hidden]) { animation:drop .22s ease-out; }
+  .split i { transition:width .3s; } .hint { transition:opacity .6s; }
+}
+@keyframes drop { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:none; } }
