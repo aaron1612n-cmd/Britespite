@@ -176,6 +176,7 @@ export function skinVertices(geo, mats, out) {
 
 /** Bake every clip. Returns frames laid out clip by clip. */
 export function bakeAll(fullGeo) {
+  const geos = Array.isArray(fullGeo) ? fullGeo : [fullGeo];
   const frames = []; const info = [];
   CLIPS.forEach((c, ci) => {
     const n = frameCount(c), first = frames.length;
@@ -183,7 +184,7 @@ export function bakeAll(fullGeo) {
       const t = c.loop ? (f * c.dur) / n : (f * c.dur) / (n - 1);
       const m = poseMatrices(POSES[ci](t));
       if (c.name.startsWith('die')) { // fit to ground so bodies rest on the terrain
-        const sk = skinVertices(fullGeo, m); let minY = Infinity; for (let i = 1; i < sk.length; i += 3) minY = Math.min(minY, sk[i]);
+        let minY = Infinity; for (const g of geos) { const sk = skinVertices(g, m); for (let i = 1; i < sk.length; i += 3) minY = Math.min(minY, sk[i]); }
         for (let b = 0; b < NB; b++) m[b * 12 + 7] -= minY;
       }
       frames.push(m);

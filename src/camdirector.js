@@ -30,7 +30,7 @@ export class Recorder {
 /** Looks enough like a Sim for Battlefield.update(). Filled each frame by Replay.sample(). */
 class ReplaySim {
   constructor(sim) {
-    const n = sim.n; this.n = n; this.TICK = sim.TICK; this.world = sim.world; this.team = sim.team; this.seed = sim.seed; this.alive = sim.alive; this.hitEvents = [];
+    const n = sim.n; this.n = n; this.TICK = sim.TICK; this.world = sim.world; this.team = sim.team; this.seed = sim.seed; this.utype = sim.utype; this.apos = new Float32Array(4); this.adir = new Float32Array(4); this.typeCount = sim.typeCount; this.alive = sim.alive; this.hitEvents = [];
     for (const k of ['x', 'z', 'yaw', 'animT']) this[k] = new Float32Array(n);
     for (const k of ['clip', 'state', 'removed', 'prevClip']) this[k] = new Uint8Array(n);
     this.vx = new Float32Array(n); this.vz = new Float32Array(n); this.prevT = new Float32Array(n); this.blend = new Float32Array(n).fill(1);

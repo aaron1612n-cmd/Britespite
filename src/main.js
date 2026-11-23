@@ -7,6 +7,7 @@ import { FlyCam } from './controls.js';
 import { BattleAudio } from './audio.js';
 import { heightAt } from './terrain.js';
 import { FORMATIONS, FORMATION_KEYS } from './formations.js';
+import { COMPOSITIONS } from './sim.js';
 import { Standards } from './banners.js';
 import { Commander } from './command.js';
 import { CamDirector } from './camdirector.js';
@@ -51,10 +52,12 @@ addEventListener('resize', resize); resize();
 
 const qf = (qs.get('form') || '').split(',');
 const form = [0, 1].map((i) => (FORMATIONS[qf[i] || qf[0]] ? qf[i] || qf[0] : 'block'));
+const qm = (qs.get('mix') || '').split(',');
+const mix = [0, 1].map((i) => (COMPOSITIONS[qm[i] || qm[0]] ? qm[i] || qm[0] : 'balanced'));
 let starting = 0;
 async function start(n) {
-  perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
-  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1, formations: form.slice() };
+  perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) battle.dispose();
+  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1, formations: form.slice(), comps: mix.slice() };
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
   const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; cmdr.ids = []; cmdr.dest = null; cmdr.refresh(); audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim);
   battle.setQuality(coarse ? 0.35 : 1); flags = new Standards(scene, sim, cols(), reduced); applyColors();
@@ -78,6 +81,8 @@ function runSweep(dt) {
 // ---- UI
 const sel = $('size'); sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide;
 for (const [id, i] of [['fa', 0], ['fb', 1]]) { const el = $(id); el.innerHTML = FORMATION_KEYS.map((k) => `<option value="${k}">${FORMATIONS[k].name}</option>`).join(''); el.value = form[i]; el.title = 'Formation (applies on restart)'; el.addEventListener('change', () => { form[i] = el.value; start(perSide); }); }
+for (const [id, i] of [['ma', 0], ['mb', 1]]) { const el = $(id); el.innerHTML = Object.keys(COMPOSITIONS).map((k) => `<option value="${k}">${COMPOSITIONS[k].name}</option>`).join(''); el.value = mix[i]; el.addEventListener('change', () => { mix[i] = el.value; start(perSide); }); }
+$('armies').onclick = () => { const s = $('setup'); s.hidden = !s.hidden; $('armies').setAttribute('aria-pressed', !s.hidden); };
 sel.addEventListener('change', () => start(+sel.value));
 const pauseBtn = $('pause'), muteBtn = $('mute');
 function setPaused(p) { G.paused = p; audio.setPaused(p); if (sim && sim.setPaused) sim.setPaused(p); pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }

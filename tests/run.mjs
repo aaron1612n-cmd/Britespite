@@ -11,7 +11,7 @@ let fails = 0, passes = 0;
 const check = (name, ok, info = '') => { ok ? passes++ : fails++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  ' + info : ''}`); };
 
 // ---------- model / animation geometry ----------
-const geo = buildSoldier(0), mid = buildSoldier(1), bake = bakeAll(geo);
+const geo = buildSoldier(0), mid = buildSoldier(1), bake = bakeAll([0, 1, 2, 3, 4].map((t) => buildSoldier(0, t)));
 const mats = (c, f) => bake.data.subarray((bake.info[c].first + f) * NB * 12, (bake.info[c].first + f + 1) * NB * 12);
 check('bake is finite', bake.data.every(Number.isFinite));
 check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s = g.attributes.aSkin; for (let i = 0; i < s.count; i++) if (s.getX(i) >= NB || s.getY(i) >= NB || s.getZ(i) < 0 || s.getZ(i) > 1) return false; return true; }));
@@ -53,6 +53,17 @@ check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s 
   for (let c = 0; c < CLIPS.length; c++) { if (['die', 'che'].includes(CLIPS[c].name.slice(0, 3))) continue; for (let f = 0; f < bake.info[c].count; f++) { const sk = skinVertices(geo, mats(c, f)); for (const i of shieldIdx) worst = Math.min(worst, sk[i * 3 + 2]); } }
   check('shield never passes behind the body line', worst > -0.1, `rearmost shield z ${worst.toFixed(2)} m`);
 }
+{ // every unit type: clean geometry in every clip, hands behind shields
+  const names = ['hoplite', 'heavy', 'archer', 'javelin', 'commander'];
+  for (let ty = 1; ty < 5; ty++) {
+    const g = buildSoldier(0, ty), m1 = buildSoldier(1, ty); let bad = '';
+    for (let c = 0; c < CLIPS.length; c++) { let mn = 9, mx = -9; for (let f = 0; f < bake.info[c].count; f++) { const s = skinVertices(g, mats(c, f)); for (let i = 1; i < s.length; i += 3) { mn = Math.min(mn, s[i]); mx = Math.max(mx, s[i]); } }
+      const die = CLIPS[c].name.startsWith('die'), lim = die ? 0.03 : 0.1; if (mn < -lim || mx > 4.0) bad += ` ${CLIPS[c].name}:${mn.toFixed(2)}/${mx.toFixed(2)}`; }
+    check(`${names[ty]}: no ground clipping in any clip`, bad === '', bad);
+    const tags = g.userData.tags; if (tags.shield) { const p = g.attributes.position; let mh = 9; for (const [a, b2] of tags.handL) for (let i = a; i < b2; i++) mh = Math.min(mh, p.getY(i)); check(`${names[ty]}: hand behind shield`, mh >= SHIELD_PLANE_Y + 0.01, mh.toFixed(3)); }
+    check(`${names[ty]}: mid LOD lighter`, m1.index.count < g.index.count * 0.45, `${g.index.count / 3} vs ${m1.index.count / 3}`);
+  }
+}
 check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, `${geo.index.count / 3} vs ${mid.index.count / 3} tris`);
 
 // ---------- sim ----------
@@ -82,6 +93,16 @@ check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, 
   check('battle ends naturally with a winner', m.winner() >= 0, `winner ${m.winner()} after ${(t * 0.05).toFixed(0)}s`);
   check('losers fled rather than all dying', m.fled[0] + m.fled[1] > 20, `fled ${m.fled}, dead ${m.deaths[0]}/${m.deaths[1]}`);
   check('battle ends within 8 minutes', t * 0.05 < 480, `${(t * 0.05).toFixed(0)}s`);
+}
+{ // mixed armies: all five types appear, archers and javelins hit from range, commander buffs allies
+  const s = new Sim({ perSide: 1500, seed: 8, comps: ['balanced', 'balanced'] });
+  check('mixed army has every unit type', s.typeCount.every((c) => c > 0) && s.typeCount.reduce((a, b) => a + b) === s.n, `${s.typeCount}`);
+  let maxArrows = 0, sawBuff = false; for (let i = 0; i < 1600; i++) { s.tick(0.05); let a = 0; for (let k = 0; k < s.adir.length; k += 4) a += s.adir[k + 3]; maxArrows = Math.max(maxArrows, a); }
+  for (let i = 0; i < s.n; i++) if (s.tickCount - s.buffT[i] <= 8) { sawBuff = true; break; }
+  const dead = { 2: 0, 3: 0 }; for (let i = 0; i < s.n; i++) if (s.state[i] === ST.DEAD) { /* corpses */ }
+  check('archers and javelineers loose projectiles', maxArrows > 5, `${maxArrows} in flight at once`);
+  check('commander aura buffs nearby troops', sawBuff);
+  check('mixed battle produces casualties on both sides', s.deaths[0] > 20 && s.deaths[1] > 20, `${s.deaths[0]}/${s.deaths[1]}`);
 }
 { // every formation lays out an army without stacking, and each one actually fights
   const { FORMATION_KEYS } = await import('../src/formations.js');
