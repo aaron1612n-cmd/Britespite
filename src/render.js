@@ -202,5 +202,8 @@ export class Battlefield {
     q.nearR = Math.min(60, Math.max(8, q.nearR * (a >= q.nearCap ? 0.96 : a < q.nearCap * 0.7 ? 1.015 : 1)));
     q.midR = Math.min(260, Math.max(q.nearR + 20, q.midR * (b >= q.midCap ? 0.96 : b < q.midCap * 0.7 ? 1.015 : 1)));
   }
+  setTeamColors(a, b) {
+    const t = this.uniforms.uTeam.value; t[0].set(a); t[1].set(a).multiplyScalar(0.62); t[2].set(b); t[3].set(b).multiplyScalar(0.62);
+  }
   setQuality(k) { this.q.nearCap = Math.round(900 * k); this.q.midCap = Math.round(5000 * k); }
 }

@@ -7,6 +7,8 @@ export const THEME = {
   panel: 'rgba(20,18,15,0.82)',
   teamA: '#b3352b', // crimson army
   teamB: '#2f5f9a', // blue army
+  // choosable army colours (first two are the defaults); picker cycles through these
+  palette: [{ n: 'Crimson', c: '#b3352b' }, { n: 'Azure', c: '#2f5f9a' }, { n: 'Forest', c: '#3f7a46' }, { n: 'Saffron', c: '#c98a1c' }, { n: 'Violet', c: '#6e4a8a' }, { n: 'Ash', c: '#8a8d8f' }, { n: 'Black', c: '#2a2a2e' }, { n: 'Bone', c: '#d8d0b8' }],
   skin: '#b98d68',
   bronze: '#a9772f',
   wood: '#6b4a2b',
