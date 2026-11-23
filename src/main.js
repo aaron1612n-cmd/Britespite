@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import './ui.css';
 import { THEME, applyTheme } from './theme.js';
 import { Sim } from './sim.js';
 import { RemoteSim } from './remote.js';
@@ -91,7 +92,6 @@ fillSizes(); modeSel.value = mode;
 modeSel.addEventListener('change', () => { mode = modeSel.value; perSide = defaultSize(); if (!SIZES.includes(perSide)) SIZES.push(perSide), SIZES.sort((a, b) => a - b); fillSizes(); start(perSide); });
 for (const [id, i] of [['fa', 0], ['fb', 1]]) { const el = $(id); el.innerHTML = FORMATION_KEYS.map((k) => `<option value="${k}">${FORMATIONS[k].name}</option>`).join(''); el.value = form[i]; el.title = 'Formation (applies on restart)'; el.addEventListener('change', () => { form[i] = el.value; start(perSide); }); }
 for (const [id, i] of [['ma', 0], ['mb', 1]]) { const el = $(id); el.innerHTML = Object.keys(COMPOSITIONS).map((k) => `<option value="${k}">${COMPOSITIONS[k].name}</option>`).join(''); el.value = mix[i]; el.addEventListener('change', () => { mix[i] = el.value; start(perSide); }); }
-$('armies').onclick = () => { const s = $('setup'); s.hidden = !s.hidden; $('armies').setAttribute('aria-pressed', !s.hidden); };
 sel.addEventListener('change', () => start(+sel.value));
 for (const [id, set, key] of [['terrain', TERRAINS, 'terrain'], ['weather', WEATHERS, 'weather'], ['time', TIMES, 'time']]) {
   const el = $(id); el.innerHTML = Object.entries(set).map(([k, v]) => `<option value="${k}">${v}</option>`).join(''); el.value = look[key];
@@ -105,6 +105,8 @@ const panel = $('panel'), statsBtn = $('statsBtn'); let showStats = true;
 function setStats(v) { showStats = v; panel.hidden = !v; statsBtn.setAttribute('aria-pressed', v); }
 statsBtn.onclick = () => setStats(!showStats); setStats(true);
 $('restart').onclick = () => start(perSide);
+const setupBtn = $('setupBtn'), setupEl = $('setup');
+setupBtn.onclick = () => { const o = setupEl.hidden; setupEl.hidden = !o; setupBtn.setAttribute('aria-pressed', o); setupBtn.setAttribute('aria-expanded', o); };
 const SPEEDS = [1, 2, 4, 8], ffBtn = $('ff'); let speed = 1;
 function setSpeed(v) { speed = v; ffBtn.textContent = v + '×'; ffBtn.setAttribute('aria-pressed', v > 1); if (sim && sim.setSpeed) sim.setSpeed(v); G.speed = v; }
 ffBtn.onclick = () => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]);
