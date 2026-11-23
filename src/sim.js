@@ -1,7 +1,7 @@
 // Headless battle simulation: spatial-hash combat for tens of thousands of spear soldiers.
 import { CLIP, CLIPS } from './clips.js';
 
-export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3 };
+export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
 const MR = 2, ROUT_AT = 0.16, RALLY_AT = 0.5, CELL = 2, REACH = 2.3, SEP = 0.9, AGGRO = 26, TICK = 0.05;
 const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CLIPS[CLIP.ATTACK].hit;
 
@@ -23,7 +23,7 @@ export class Sim {
     this.meta = A(Float64Array, 4); this.hits = 0; this.hitEvents = []; // {x,z,kill}
     this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','alive','deaths','meta'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n);
-    this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0];
+    this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0]; this.over = -1; // over: -1 running, else winning team
     // morale (sim-internal, not shared): 1 = steady, below ROUT_AT the unit breaks and runs
     this.morale = new Float32Array(n).fill(1); this.rout = new Uint8Array(n); this.fled = [0, 0]; this.routing = [0, 0];
     this.layout(spacing, gap);
@@ -130,9 +130,10 @@ export class Sim {
   tick(dt) {
     const n = this.n, c = this.cells; this.time += dt; this.tickCount++; this.meta[0] = performance.timeOrigin + performance.now(); this.meta[1] = this.tickCount; this.hitEvents.length = 0;
     this.buildGrid();
+    if (this.over < 0 && (this.alive[0] === 0 || this.alive[1] === 0)) this.endBattle();
     const { x, z, vx, vz, yaw, team, state, stateT, cd, tgt, spd, clip } = this;
     for (let i = 0; i < n; i++) {
-      const st = state[i]; if (st === ST.DEAD || this.removed[i]) continue;
+      const st = state[i]; if (st === ST.DEAD || st === ST.CHEER || this.removed[i]) continue;
       stateT[i] += dt; cd[i] -= dt; if (((this.tickCount + i) & 3) === 0 && st !== ST.HIT) this.moraleCheck(i, dt * 4); const me = team[i], dir = me === 0 ? 1 : -1;
       let desX = 0, desZ = 0, sp = 0;
       if (st === ST.ATTACK) {
@@ -200,10 +201,19 @@ export class Sim {
     while (this.deadQ.length - this.deadHead > this.corpseCap) this.removed[this.deadQ[this.deadHead++]] = 1;
     if (this.deadHead > 4096) { this.deadQ = this.deadQ.slice(this.deadHead); this.deadHead = 0; }
   }
+  /** One side is wiped out: survivors stop marching and cheer instead of walking off the map. */
+  endBattle() {
+    this.over = this.alive[0] === 0 ? 1 : 0;
+    for (let i = 0; i < this.n; i++) {
+      if (this.removed[i] || this.state[i] === ST.DEAD) continue;
+      this.state[i] = ST.CHEER; this.vx[i] = this.vz[i] = 0; this.tgt[i] = -1;
+      this.setClip(i, CLIP.CHEER, this.rand() * 1.2);
+    }
+  }
   turn(i, target, dt, rate) {
     let d = target - this.yaw[i]; d = Math.atan2(Math.sin(d), Math.cos(d)); const m = rate * dt;
     this.yaw[i] += Math.max(-m, Math.min(m, d));
   }
-  winner() { return this.alive[0] === 0 ? 1 : this.alive[1] === 0 ? 0 : -1; }
+  winner() { return this.over; }
   hash() { let h = 2166136261; for (let i = 0; i < this.n; i += 7) { h = Math.imul(h ^ ((this.x[i] * 100) | 0), 16777619); h = Math.imul(h ^ ((this.hp[i]) | 0), 16777619); } return h >>> 0; }
 }

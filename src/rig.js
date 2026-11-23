@@ -78,6 +78,28 @@ export const POSES = [
     { t: 0.3, ik: 0, py: -0.25, prx: 0.15, crx: 0.25, hrx: 0.2, tlx: -0.6, trx: -0.6, slx: 1.2, srx: 1.2 },
     { t: 0.75, ik: 0, py: -0.4, prx: 0.9, crx: 0.2, hrx: -0.3, tlx: 0.1, trx: 0.1, slx: 0.3, srx: 0.3, ulz: 0.6, urz: -0.6, ulx: -0.8, urx: -0.8, spx: 0.3, spy: 0.05, spz: 0.9 },
     { t: 1.5, ik: 0, py: -0.5, prx: 1.5, crx: 0.1, hrx: -0.6, tlx: 0.2, trx: 0.2, slx: 0.2, srx: 0.2, ulz: 0.9, urz: -0.9, ulx: -1.4, urx: -1.4, flx: -0.3, frx: -0.3, spx: 0.3, spy: 0.02, spz: 1 }], 1.5, false),
+  // shoot (archer): side-on stance, bow arm out, string hand drawn to the cheek, release at 0.55 s
+  keyed([
+    { t: 0 },
+    { t: 0.14, lfx: 0.2, lfz: 0.1, rfx: -0.2, rfz: -0.1, lfy: 0.12, ulx: -1.2, flx: -0.2, urx: -0.3, urz: -0.9, frx: -1.8, cry: -0.35, pry: -0.15, crx: 0.04 },
+    { t: 0.5, lfx: 0.2, lfz: 0.1, rfx: -0.2, rfz: -0.1, ulx: -1.5, flx: -0.05, urx: -0.3, urz: -1.3, frx: -2.5, cry: -0.7, pry: -0.3, crx: 0.04, hry: 0.5 },
+    { t: 0.6, lfx: 0.2, lfz: 0.1, rfx: -0.2, rfz: -0.1, ulx: -1.5, flx: -0.05, urx: -0.3, urz: -1.15, frx: -1.9, cry: -0.55, pry: -0.25, hry: 0.5 },
+    { t: 0.85, lfx: 0.2, lfz: 0.1, rfx: -0.2, rfz: -0.1, ulx: -1.2, flx: -0.2, urx: -0.3, urz: -0.5, frx: -1.5, cry: -0.2, pry: -0.1, hry: 0.2 },
+    { t: 1.1 }], 1.1, false),
+  // throw (javelin): wind-up behind the shoulder, overarm release at 0.42 s
+  keyed([
+    { t: 0 },
+    { t: 0.22, lfx: 0.14, lfz: 0.28, rfx: -0.14, rfz: -0.2, urx: 0.7, frx: -0.5, cry: -0.45, crx: 0.1, py: -0.06, spy: 0.45, spz: 0.9 },
+    { t: 0.42, lfx: 0.14, lfz: 0.28, rfx: -0.14, rfz: -0.2, urx: -2.4, frx: -0.15, cry: 0.45, crx: 0.25, pz: 0.12, py: -0.1, spy: 0.3, spz: 0.95 },
+    { t: 0.6, lfx: 0.14, lfz: 0.28, rfx: -0.14, rfz: -0.2, urx: -1.3, frx: -0.6, cry: 0.3, crx: 0.2, pz: 0.1, py: -0.08, spy: 0.6, spz: 0.8 },
+    { t: 0.85 }], 0.85, false),
+  // cheer: spear and shield raised, hopping
+  keyed([
+    { t: 0, ulx: -2.7, flx: -0.2, ulz: 0.2, urx: -2.9, frx: -0.15, spy: 1, spz: 0.05, crx: -0.05 },
+    { t: 0.3, py: 0.05, lfy: 0.17, rfy: 0.17, ulx: -2.7, flx: -0.2, ulz: 0.2, urx: -2.9, frx: -0.15, spy: 1, spz: 0.05, crx: -0.08 },
+    { t: 0.6, py: -0.07, ulx: -2.5, flx: -0.3, ulz: 0.2, urx: -2.7, frx: -0.2, spy: 1, spz: 0.08, crx: 0.02 },
+    { t: 0.9, py: 0.05, lfy: 0.17, rfy: 0.17, ulx: -2.7, flx: -0.2, ulz: 0.2, urx: -2.9, frx: -0.15, spy: 1, spz: 0.05, crx: -0.08 },
+    { t: 1.2, ulx: -2.7, flx: -0.2, ulz: 0.2, urx: -2.9, frx: -0.15, spy: 1, spz: 0.05, crx: -0.05 }], 1.2, true),
 ];
 
 // ---------- pose -> skin matrices ----------

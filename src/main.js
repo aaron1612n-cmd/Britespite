@@ -129,7 +129,7 @@ function hud() {
   t('sa', al[0]); t('sb', al[1]); t('ka', de[1]); t('kb', de[0]); t('xa', de[0]); t('xb', de[1]);
   $('pa').textContent = Math.round((al[0] / P) * 100) + '%'; $('pb').textContent = Math.round((al[1] / P) * 100) + '%';
   const tot = al[0] + al[1] || 1; $('bara').style.width = (al[0] / tot) * 100 + '%'; $('barb').style.width = (al[1] / tot) * 100 + '%';
-  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = `${pal[ci[w]].n} holds the field`; }
+  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = `${pal[ci[w]].n} holds the field`; } else bn.style.display = 'none';
 }
 G.step = (ticks = 1) => { if (!G.worker) for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
 G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };

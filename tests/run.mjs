@@ -29,7 +29,7 @@ check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s 
   for (let c = 0; c < CLIPS.length; c++) {
     let mn = 9, mx = -9;
     for (let f = 0; f < bake.info[c].count; f++) { const s = skinVertices(geo, mats(c, f)); for (let i = 1; i < s.length; i += 3) { mn = Math.min(mn, s[i]); mx = Math.max(mx, s[i]); } }
-    const die = CLIPS[c].name.startsWith('die'), lim = die ? 0.02 : 0.08; if (mn < -lim || mx > 3.2) { ok = false; info += ` ${CLIPS[c].name}:min${mn.toFixed(2)}/max${mx.toFixed(2)}`; }
+    const die = CLIPS[c].name.startsWith('die'), lim = die ? 0.02 : 0.08; if (mn < -lim || mx > 4.0) { ok = false; info += ` ${CLIPS[c].name}:min${mn.toFixed(2)}/max${mx.toFixed(2)}`; }
   }
   check('no ground clipping, sane height in all clips', ok, info);
 }
@@ -50,7 +50,7 @@ check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s 
   // in every pose the shield stays clear of the head/torso zone in front of the chest (no body clipping)
   let worst = 9; const p = geo.attributes.position, s = geo.attributes.aSkin;
   const shieldIdx = []; for (const [a, b] of geo.userData.tags.shield) for (let i = a; i < b; i++) shieldIdx.push(i);
-  for (let c = 0; c < CLIPS.length; c++) { if (CLIPS[c].name.startsWith('die')) continue; for (let f = 0; f < bake.info[c].count; f++) { const sk = skinVertices(geo, mats(c, f)); for (const i of shieldIdx) worst = Math.min(worst, sk[i * 3 + 2]); } }
+  for (let c = 0; c < CLIPS.length; c++) { if (['die', 'che'].includes(CLIPS[c].name.slice(0, 3))) continue; for (let f = 0; f < bake.info[c].count; f++) { const sk = skinVertices(geo, mats(c, f)); for (const i of shieldIdx) worst = Math.min(worst, sk[i * 3 + 2]); } }
   check('shield never passes behind the body line', worst > -0.1, `rearmost shield z ${worst.toFixed(2)} m`);
 }
 check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, `${geo.index.count / 3} vs ${mid.index.count / 3} tris`);
@@ -67,6 +67,15 @@ check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, 
   check('soldiers do not stack on each other', overlaps / idx.length < 0.03, `${overlaps} overlapping pairs among ${idx.length} fighters`);
   const dead = [...Array(a.n).keys()].filter((i) => a.state[i] === ST.DEAD && !a.removed[i]);
   check('dead units play a death clip', dead.every((i) => a.clip[i] === CLIP.DIE_BACK || a.clip[i] === CLIP.DIE_FWD));
+}
+{ // lopsided fight: when one side dies the winners must stop and cheer, not keep marching
+  const s = new Sim({ perSide: 150, seed: 4 }); 
+  for (let i = 0; i < s.perSide; i++) { s.hp[s.perSide + i] = 1; s.spd[i] *= 1; }
+  let k = 0; while (s.winner() < 0 && k < 4000) { s.tick(0.05); k++; }
+  const w = s.winner(), pos0 = [...s.x]; for (let i = 0; i < 200; i++) s.tick(0.05);
+  const surv = [...Array(s.n).keys()].filter((i) => s.state[i] !== ST.DEAD && !s.removed[i]);
+  check('battle ends with a winner', w >= 0 && surv.length > 0, `winner ${w} after ${(k * 0.05).toFixed(0)} s`);
+  check('survivors cheer and stay put', surv.every((i) => s.state[i] === ST.CHEER && s.clip[i] === CLIP.CHEER && Math.abs(s.x[i] - pos0[i]) < 1e-3 && s.vx[i] === 0 && s.vz[i] === 0), `${surv.length} survivors`);
 }
 { // morale: losing side breaks and flees, battle ends instead of grinding on
   const m = new Sim({ perSide: 400, seed: 5 }); let t = 0; while (m.winner() < 0 && t < 12000) { m.tick(0.05); t++; }

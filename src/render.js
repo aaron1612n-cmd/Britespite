@@ -12,7 +12,7 @@ const FOG = 0.0009;
 
 const COMMON_VS = /* glsl */`
 precision highp float; precision highp sampler2D;
-uniform sampler2D uBones; uniform vec4 uClips[7];
+uniform sampler2D uBones; uniform vec4 uClips[10];
 attribute vec4 iA; attribute vec4 iB; attribute vec4 iC; attribute float aMat; attribute vec3 aSkin;
 varying vec3 vN; varying float vMat; varying float vSeed; varying float vTeam; varying float vLY; varying float vDepth;
 void rows(int clip, float t, int bone, out vec4 r0, out vec4 r1, out vec4 r2) {
@@ -75,7 +75,7 @@ precision highp float;
 uniform vec3 uRight; attribute vec2 corner; attribute vec4 iA; attribute vec4 iB;
 varying vec2 vUv; varying float vTeam; varying float vDead; varying float vSeed; varying float vDepth;
 void main() {
-  vDead = iB.x > 4.5 ? 1.0 : 0.0; vTeam = iB.z; vSeed = iB.w; vUv = corner + 0.5;
+  vDead = (iB.x > 4.5 && iB.x < 6.5) ? 1.0 : 0.0; vTeam = iB.z; vSeed = iB.w; vUv = corner + 0.5;
   float w = vDead > 0.5 ? 1.9 : 1.1, h = vDead > 0.5 ? 0.7 : 2.6;
   vec3 wp = iA.xyz + uRight * corner.x * w + vec3(0.0, corner.y + 0.5, 0.0) * h;
   vec4 mv = viewMatrix * vec4(wp, 1.0); vDepth = -mv.z; gl_Position = projectionMatrix * mv;
