@@ -17,17 +17,12 @@ const WEATHER = {
   rain: { fogK: 2, gray: 0.8, bright: 0.72, sun: 0.25, amb: 0.85, rain: 1, wet: 1, glow: 0 },
 };
 const gray = (c, w) => { const l = (c.r * 0.3 + c.g * 0.59 + c.b * 0.11) * w.bright; return c.clone().lerp(new THREE.Color(l, l, l), w.gray); };
-const tone = (s) => { // overall brightness vs a clear day, per channel, for the flat-shaded far impostors
-  const d = TIME.day; const ref = (a, g, sc) => 0.5 * (a + g) + sc * d.sunI * 0.19;
-  const dc = C(d.sunCol); const r = ref(d.ambS[0], d.ambG[0], dc.r), g = ref(d.ambS[1], d.ambG[1], dc.g), b = ref(d.ambS[2], d.ambG[2], dc.b);
-  return new THREE.Vector3((0.5 * (s.ambS.x + s.ambG.x) + s.sunCol.r * s.sunI * 0.19) / r, (0.5 * (s.ambS.y + s.ambG.y) + s.sunCol.g * s.sunI * 0.19) / g, (0.5 * (s.ambS.z + s.ambG.z) + s.sunCol.b * s.sunI * 0.19) / b);
-};
 function target(time, weather) {
   const t = TIME[time] || TIME.day, w = WEATHER[weather] || WEATHER.clear;
   const s = { sun: V(t.sun).normalize(), sunCol: C(t.sunCol), sunI: t.sunI * w.sun, top: gray(C(t.top), w), hor: gray(C(t.hor), w), fog: gray(C(t.fog), w), fogD: FOG_BASE * t.fogK * w.fogK,
     hemiS: gray(C(t.hemiS), w), hemiG: gray(C(t.hemiG), w), hemiI: t.hemiI * w.amb, ambS: V(t.ambS).multiplyScalar(w.amb * (0.6 + 0.4 * w.bright)), ambG: V(t.ambG).multiplyScalar(w.amb * (0.6 + 0.4 * w.bright)),
     glow: C(t.glowCol).multiplyScalar(t.glow * w.glow), rain: w.rain, wet: w.wet };
-  s.tone = tone(s); return s;
+  return s;
 }
 function ease(cur, tgt, k) {
   for (const key in tgt) { const a = cur[key], b = tgt[key]; if (typeof b === 'number') cur[key] = a + (b - a) * k; else a.lerp(b, k); }
@@ -70,7 +65,7 @@ export class Atmosphere {
   apply(dt, camera) {
     const b = this.b, s = this.cur, u = b.uniforms;
     b.scene.fog.color.copy(s.fog); b.scene.fog.density = s.fogD; u.uFog.value.copy(s.fog); u.uFogD.value = s.fogD;
-    u.uSun.value.copy(s.sun); u.uSunCol.value.set(s.sunCol.r, s.sunCol.g, s.sunCol.b).multiplyScalar((s.sunI / 2.2) * 0.85); u.uAmbS.value.copy(s.ambS); u.uAmbG.value.copy(s.ambG); u.uTone.value.copy(s.tone);
+    u.uSun.value.copy(s.sun); u.uSunCol.value.set(s.sunCol.r, s.sunCol.g, s.sunCol.b).multiplyScalar((s.sunI / 2.2) * 0.85); u.uAmbS.value.copy(s.ambS); u.uAmbG.value.copy(s.ambG); if (b.refreshImpLit) b.refreshImpLit();
     b.sun.color.copy(s.sunCol); b.sun.intensity = s.sunI; b.sun.position.copy(s.sun).multiplyScalar(100);
     b.hemi.color.copy(s.hemiS); b.hemi.groundColor.copy(s.hemiG); b.hemi.intensity = s.hemiI;
     const su = b.sky.material.uniforms; su.top.value.copy(s.top); su.hor.value.copy(s.hor); su.uSun.value.copy(s.sun); su.uGlow.value.copy(s.glow);
