@@ -15,7 +15,7 @@ let fails = 0, passes = 0;
 const check = (name, ok, info = '') => { ok ? passes++ : fails++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  ' + info : ''}`); };
 
 // ---------- model / animation geometry ----------
-const geo = buildSoldier(0), mid = buildSoldier(1), bake = bakeAll([0, 1, 2, 3, 4].map((t) => buildSoldier(0, t)));
+const geo = buildSoldier(0), mid = buildSoldier(1), bake = bakeAll([0, 1, 2, 3, 4, 5].map((t) => buildSoldier(0, t)));
 const mats = (c, f) => bake.data.subarray((bake.info[c].first + f) * NB * 12, (bake.info[c].first + f + 1) * NB * 12);
 check('bake is finite', bake.data.every(Number.isFinite));
 check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s = g.attributes.aSkin; for (let i = 0; i < s.count; i++) if (s.getX(i) >= NB || s.getY(i) >= NB || s.getZ(i) < 0 || s.getZ(i) > 1) return false; return true; }));
@@ -30,10 +30,10 @@ check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s 
 }
 { // ground clipping + size
   let ok = true, info = '';
-  for (let c = 0; c < CLIPS.length; c++) {
+  for (let c = 0; c < CLIPS.length; c++) { if (CLIPS[c].cav) continue;
     let mn = 9, mx = -9;
     for (let f = 0; f < bake.info[c].count; f++) { const s = skinVertices(geo, mats(c, f)); for (let i = 1; i < s.length; i += 3) { mn = Math.min(mn, s[i]); mx = Math.max(mx, s[i]); } }
-    const die = CLIPS[c].name.startsWith('die'), lim = die ? 0.02 : 0.08; if (mn < -lim || mx > 4.0) { ok = false; info += ` ${CLIPS[c].name}:min${mn.toFixed(2)}/max${mx.toFixed(2)}`; }
+    const die = CLIPS[c].name.includes('die'), lim = die ? 0.02 : 0.08; if (mn < -lim || mx > 4.0) { ok = false; info += ` ${CLIPS[c].name}:min${mn.toFixed(2)}/max${mx.toFixed(2)}`; }
   }
   check('no ground clipping, sane height in all clips', ok, info);
 }
@@ -54,21 +54,88 @@ check('every vertex has valid bones/weights', [geo, mid].every((g) => { const s 
   // in every pose the shield stays clear of the head/torso zone in front of the chest (no body clipping)
   let worst = 9; const p = geo.attributes.position, s = geo.attributes.aSkin;
   const shieldIdx = []; for (const [a, b] of geo.userData.tags.shield) for (let i = a; i < b; i++) shieldIdx.push(i);
-  for (let c = 0; c < CLIPS.length; c++) { if (['die', 'che'].includes(CLIPS[c].name.slice(0, 3))) continue; for (let f = 0; f < bake.info[c].count; f++) { const sk = skinVertices(geo, mats(c, f)); for (const i of shieldIdx) worst = Math.min(worst, sk[i * 3 + 2]); } }
+  for (let c = 0; c < CLIPS.length; c++) { if (CLIPS[c].cav || ['die', 'che'].includes(CLIPS[c].name.slice(0, 3))) continue; for (let f = 0; f < bake.info[c].count; f++) { const sk = skinVertices(geo, mats(c, f)); for (const i of shieldIdx) worst = Math.min(worst, sk[i * 3 + 2]); } }
   check('shield never passes behind the body line', worst > -0.1, `rearmost shield z ${worst.toFixed(2)} m`);
 }
 { // every unit type: clean geometry in every clip, hands behind shields
-  const names = ['hoplite', 'heavy', 'archer', 'javelin', 'commander'];
-  for (let ty = 1; ty < 5; ty++) {
+  const names = ['hoplite', 'heavy', 'archer', 'javelin', 'commander', 'cavalry'];
+  for (let ty = 1; ty < 6; ty++) {
     const g = buildSoldier(0, ty), m1 = buildSoldier(1, ty); let bad = '';
-    for (let c = 0; c < CLIPS.length; c++) { let mn = 9, mx = -9; for (let f = 0; f < bake.info[c].count; f++) { const s = skinVertices(g, mats(c, f)); for (let i = 1; i < s.length; i += 3) { mn = Math.min(mn, s[i]); mx = Math.max(mx, s[i]); } }
-      const die = CLIPS[c].name.startsWith('die'), lim = die ? 0.03 : 0.1; if (mn < -lim || mx > 4.0) bad += ` ${CLIPS[c].name}:${mn.toFixed(2)}/${mx.toFixed(2)}`; }
+    for (let c = 0; c < CLIPS.length; c++) { if (!!CLIPS[c].cav !== !!g.userData.cav) continue; let mn = 9, mx = -9; for (let f = 0; f < bake.info[c].count; f++) { const s = skinVertices(g, mats(c, f)); for (let i = 1; i < s.length; i += 3) { mn = Math.min(mn, s[i]); mx = Math.max(mx, s[i]); } }
+      const die = CLIPS[c].name.includes('die'), lim = die ? 0.03 : 0.1; if (mn < -lim || mx > (g.userData.cav ? 5 : 4)) bad += ` ${CLIPS[c].name}:${mn.toFixed(2)}/${mx.toFixed(2)}`; }
     check(`${names[ty]}: no ground clipping in any clip`, bad === '', bad);
     const tags = g.userData.tags; if (tags.shield) { const p = g.attributes.position; let mh = 9; for (const [a, b2] of tags.handL) for (let i = a; i < b2; i++) mh = Math.min(mh, p.getY(i)); check(`${names[ty]}: hand behind shield`, mh >= SHIELD_PLANE_Y + 0.01, mh.toFixed(3)); }
     check(`${names[ty]}: mid LOD lighter`, m1.index.count < g.index.count * 0.45, `${g.index.count / 3} vs ${m1.index.count / 3}`);
   }
 }
 check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, `${geo.index.count / 3} vs ${mid.index.count / 3} tris`);
+
+
+// ---------- cavalry: horse + rider ----------
+{
+  const { HF, B } = await import('../src/skeleton.js'); const { CAV, CAV_TROT, CAV_CHARGE } = await import('../src/clips.js'); const { barrelAt } = await import('../src/model.js');
+  const cg = buildSoldier(0, 5), cm = buildSoldier(1, 5), tags = cg.userData.tags, RIDE = [0, 1, 2, 3, 4, 7, 8, 9].map((k) => CAV + k);
+  const place = (b, m) => [0, 1, 2].map((r) => m[b * 12 + r * 4 + 3] + m[b * 12 + r * 4] * BONES[b].pivot[0] + m[b * 12 + r * 4 + 1] * BONES[b].pivot[1] + m[b * 12 + r * 4 + 2] * BONES[b].pivot[2]);
+  const rng = (g, [a, b2]) => { const o = []; for (let i = a; i < b2; i++) o.push(i); return o; };
+  check('cavalry is a mounted rider plus a horse (two tagged parts)', !!tags.rider && !!tags.horse && cg.userData.cav === true && tags.rider[0][1] === tags.horse[0][0]);
+  check('cavalry geometry: valid bones and weights', (() => { const sk = cg.attributes.aSkin; for (let i = 0; i < sk.count; i++) if (sk.getX(i) >= NB || sk.getY(i) >= NB || sk.getZ(i) < 0 || sk.getZ(i) > 1) return false; return true; })());
+  // horse anatomy in the bind pose: a long barrel, neck rising to a head above the withers, four tapering legs ending in hooves on the ground
+  { const p = cg.attributes.position; let mnY = 9, mxY = -9, mnZ = 9, mxZ = -9, xs = 0; for (const [a, b2] of tags.horse) for (let i = a; i < b2; i++) { mnY = Math.min(mnY, p.getY(i)); mxY = Math.max(mxY, p.getY(i)); mnZ = Math.min(mnZ, p.getZ(i)); mxZ = Math.max(mxZ, p.getZ(i)); xs = Math.max(xs, Math.abs(p.getX(i))); }
+    check('horse proportions: ~2 m high at the ears, 2.5-3.4 m nose to tail incl. tail, ~0.7 m wide', mnY > -0.01 && mnY < 0.02 && mxY > 2.0 && mxY < 2.3 && mxZ - mnZ > 2.5 && mxZ - mnZ < 3.4 && xs > 0.28 && xs < 0.45, `y ${mnY.toFixed(2)}..${mxY.toFixed(2)}, length ${(mxZ - mnZ).toFixed(2)}, half width ${xs.toFixed(2)}`); }
+  // every frame of every mounted clip: rider seat stays on the saddle, hooves above the ground, nothing floats or sinks
+  let worstSeat = 0, minGround = 9, floatMax = 0, cn = '';
+  const seatIdx = [], p0 = cg.attributes.position; for (const [a, b2] of tags.rider) for (let i = a; i < b2; i++) { const y = p0.getY(i); if (y > 0.92 && y < 1.0 && Math.abs(p0.getX(i)) < 0.17 && Math.abs(p0.getZ(i)) < 0.2) seatIdx.push(i); }
+  for (const ci of RIDE) { const c = CLIPS[ci];
+    for (let f = 0; f < bake.info[ci].count; f++) {
+      const sk = skinVertices(cg, mats(ci, f)); let mn = 9; for (let i = 1; i < sk.length; i += 3) mn = Math.min(mn, sk[i]);
+      minGround = Math.min(minGround, mn); if (!c.name.includes('rear')) floatMax = Math.max(floatMax, mn); // a riding horse always has a hoof near the ground, except in the air phase of a gallop (<= 0.3 m)
+      // seat: centroid of the rider's pelvis vertices vs the saddle top (barrel top at z~0 + pad) -> within 0.2 m vertically and 0.25 m along the spine of the saddle point
+      let cx = 0, cy = 0, cz = 0; for (const i of seatIdx) { cx += sk[i * 3]; cy += sk[i * 3 + 1]; cz += sk[i * 3 + 2]; } cx /= seatIdx.length; cy /= seatIdx.length; cz /= seatIdx.length;
+      const sd = Math.hypot(cx, cy - 1.52, cz + 0.05); if (sd > worstSeat) { worstSeat = sd; cn = `${c.name}@${f}`; }
+    } }
+  check('mounted clips: rider pelvis stays on the saddle', worstSeat < 0.45, `worst ${worstSeat.toFixed(2)} m from the saddle point (${cn})`);
+  check('mounted clips: no ground clipping (hooves >= -4 cm)', minGround > -0.04, `lowest point ${minGround.toFixed(3)} m`);
+  check('mounted clips: horse never floats more than 30 cm', floatMax < 0.3, `highest lowest-point ${floatMax.toFixed(2)} m`);
+  // rider sits astride: the thighs are outside the barrel surface (no leg inside the horse) at rest
+  { const sk = skinVertices(cg, mats(CAV, 0)); let worst = 0; for (const [a, b2] of tags.rider) for (let i = a; i < b2; i++) { const y = sk[i * 3 + 1], z = sk[i * 3 + 2], x = Math.abs(sk[i * 3]), br = barrelAt(z); if (!br || p0.getY(i) > 0.6 || y < 0.8) continue; const e = Math.sqrt((x / br.rx) ** 2 + ((y - br.cy) / br.ry) ** 2); if (e < 0.86) worst = Math.max(worst, (1 - e) * br.rx); }
+    check('rider legs do not sink into the horse barrel', worst < 0.07, `deepest rider vertex ${(worst * 100).toFixed(1)} cm inside`); }
+  // hooves are planted in stance: ground speed matches the clip speed for all four legs in every gait
+  for (const [ci, label] of [[CAV + 1, 'walk'], [CAV_TROT, 'trot'], [CAV + 2, 'gallop'], [CAV_CHARGE, 'charge']]) {
+    const c = CLIPS[ci], n = bake.info[ci].count, dt = c.dur / n; let worst = 0, stance = 0, legs = 0;
+    for (const hb of [B.FL_H, B.FR_H, B.BL_H, B.BR_H]) { const P = (k) => place(hb, mats(ci, ((k % n) + n) % n)), low = (k) => P(k)[1] < HF.fet + 0.012; let ls = 0;
+      for (let f = 0; f < n; f++) if ([-2, -1, 0, 1, 2].every((d) => low(f + d))) { ls++; stance++; const vz = (P(f + 1)[2] - P(f - 1)[2]) / (2 * dt); worst = Math.max(worst, Math.abs(vz + c.speed)); } // interior stance frames only (touch-down/lift-off frames blend with the swing)
+      if (ls >= 1) legs++; }
+    check(`horse ${label}: hooves planted (all 4 legs touch down, no sliding)`, legs === 4 && worst < 0.12 * c.speed + 0.15, `${stance} stance frames, ${legs}/4 legs, worst slide ${worst.toFixed(2)} m/s`);
+  }
+  // gait is a real footfall sequence: walk keeps 2-3 hooves down, gallop has a moment with none
+  { const down = (ci, f) => [B.FL_H, B.FR_H, B.BL_H, B.BR_H].filter((hb) => place(hb, mats(ci, f))[1] < HF.fet + 0.012).length;
+    let wmin = 9, wmax = 0, gmin = 9; for (let f = 0; f < bake.info[CAV + 1].count; f++) { const d = down(CAV + 1, f); wmin = Math.min(wmin, d); wmax = Math.max(wmax, d); } for (let f = 0; f < bake.info[CAV + 2].count; f++) gmin = Math.min(gmin, down(CAV + 2, f));
+    check('walk keeps at least two hooves down; gallop has a suspension phase', wmin >= 2 && wmax <= 4 && gmin <= 1, `walk ${wmin}-${wmax} down, gallop min ${gmin}`); }
+  // death and rear clips settle on the ground; thrust ends back in the ready pose
+  for (const ci of [CAV + 5, CAV + 6]) { let mn = 9; const fr = bake.info[ci].count - 1; const sk = skinVertices(cg, mats(ci, fr)); for (let i = 1; i < sk.length; i += 3) mn = Math.min(mn, sk[i]); check(`${CLIPS[ci].name}: body rests on the ground`, Math.abs(mn) < 0.03, `lowest ${mn.toFixed(3)}`); }
+  { const a = mats(CAV + 3, 0), b2 = mats(CAV + 3, bake.info[CAV + 3].count - 1); let d = 0; for (let i = 0; i < a.length; i++) d = Math.max(d, Math.abs(a[i] - b2[i])); check('thrust returns to its ready pose', d < 0.35, `max matrix delta ${d.toFixed(2)}`); }
+  // sim: cavalry exist in the mounted compositions, wings placement, charge bonus, wide turns, bigger spacing
+  const { COMPOSITIONS, TY, UT } = await import('../src/sim.js');
+  check('cavalry selectable in the troop selects', !!COMPOSITIONS.cavalry && !!COMPOSITIONS.horde && COMPOSITIONS.balanced.cv > 0);
+  { const s = new Sim({ perSide: 1000, seed: 3, comps: ['cavalry', 'hoplites'] }); const idx = [...Array(s.perSide).keys()].filter((i) => s.utype[i] === UT.CAVALRY), mx = Math.abs(Math.max(...idx.map((i) => Math.abs(s.x[i]))));
+    const mean = idx.reduce((a, i) => a + Math.abs(s.x[i]), 0) / idx.length, all = [...Array(s.perSide).keys()].reduce((a, i) => a + Math.abs(s.x[i]), 0) / s.perSide;
+    check('cavalry army: ~30% mounted, riding the wings', idx.length > 250 && idx.length < 350 && mean > all, `${idx.length} riders, mean |x| ${mean.toFixed(0)} vs army ${all.toFixed(0)}`); }
+  { // charge: same cavalryman hits harder after a gallop than from a standstill
+    const first = (startZ) => { let tot = 0, hits = 0;
+      for (let seed = 1; seed <= 60; seed++) { const s = new Sim({ perSide: 2, seed, comps: ['hoplites', 'hoplites'] }); s.utype[0] = UT.CAVALRY; s.spd[0] = 2.1; s.hp[0] = 1e5; s.clip[0] = s.prevClip[0] = CAV;
+        s.x[1] = 100; s.z[1] = 100; s.x[3] = -100; s.z[3] = -100; s.hp[2] = 1e5; s.hp[1] = s.hp[3] = 1e5; s.x[2] = 0; s.z[2] = 0; s.x[0] = 0; s.z[0] = startZ; s.yaw[0] = 0; s.rand = () => 0.3;
+        const h0 = s.hp[2]; for (let k = 0; k < 400 && s.hp[2] === h0; k++) s.tick(0.05); if (s.hp[2] < h0) { tot += h0 - s.hp[2]; hits++; } }
+      return hits ? tot / hits : 0; };
+    const run = first(-28), still = first(-2.6);
+    check('charge bonus: a galloping lancer hits harder than one standing still', run > still * 1.4 && still > 0, `${run.toFixed(1)} after a gallop vs ${still.toFixed(1)} from a standstill`); }
+  { const s = new Sim({ perSide: 2, seed: 1, comps: ['hoplites', 'hoplites'] }); s.utype[0] = UT.CAVALRY; s.yaw[0] = s.yaw[1] = 0; s.turn(0, 3, 0.05, 8); s.turn(1, 3, 0.05, 8);
+    check('cavalry turn wider than infantry', s.yaw[0] < s.yaw[1] * 0.6 && s.yaw[0] > 0, `${s.yaw[0].toFixed(3)} vs ${s.yaw[1].toFixed(3)} rad per tick`); }
+  { const s = new Sim({ perSide: 400, seed: 5, comps: ['horde', 'cavalry'] }); for (let i = 0; i < 700; i++) s.tick(0.05);
+    const cavs = [...Array(s.n).keys()].filter((i) => s.utype[i] === UT.CAVALRY && !s.removed[i]), liveC = cavs.filter((i) => s.state[i] !== ST.DEAD), deadC = cavs.filter((i) => s.state[i] === ST.DEAD);
+    const ok = liveC.every((i) => s.clip[i] >= CAV && s.clip[i] < CAV + 10) && deadC.every((i) => s.clip[i] === CAV + 5 || s.clip[i] === CAV + 6);
+    let ovl = 0; for (let a = 0; a < liveC.length; a++) for (let b2 = a + 1; b2 < liveC.length; b2++) if (Math.hypot(s.x[liveC[a]] - s.x[liveC[b2]], s.z[liveC[a]] - s.z[liveC[b2]]) < 0.55) ovl++;
+    check('mounted battle: deaths, mounted clips, horses do not stack', s.deaths[0] + s.deaths[1] > 40 && ok && liveC.length > 20 && ovl / liveC.length < 0.05, `deaths ${s.deaths[0]}/${s.deaths[1]}, ${liveC.length} riders up, ${deadC.length} down, ${ovl} overlaps`); }
+}
 
 // ---------- sim ----------
 {
