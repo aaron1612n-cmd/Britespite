@@ -5,7 +5,8 @@ import { RemoteSim } from './remote.js';
 import { Battlefield } from './render.js';
 import { FlyCam } from './controls.js';
 import { BattleAudio } from './audio.js';
-import { heightAt } from './terrain.js';
+import { heightAt, TERRAINS } from './terrain.js';
+import { TIMES, WEATHERS } from './atmosphere.js';
 import { Standards } from './banners.js';
 import { Commander } from './command.js';
 
@@ -19,6 +20,8 @@ const SIZES = [500, 2000, 5000, 10000, 20000, 35000, 50000];
 let perSide = +qs.get('n') || (coarse ? 3000 : 10000);
 if (!SIZES.includes(perSide)) SIZES.push(perSide), SIZES.sort((a, b) => a - b);
 
+const pick = (v, set, d) => (v in set ? v : d);
+const look = { terrain: pick(qs.get('terrain'), TERRAINS, 'flat'), weather: pick(qs.get('weather'), WEATHERS, 'clear'), time: pick(qs.get('time'), TIMES, 'day'), reduced, coarse };
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && !testMode, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75));
@@ -48,10 +51,10 @@ addEventListener('resize', resize); resize();
 
 let starting = 0;
 async function start(n) {
-  perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
-  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1 };
+  perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) battle.dispose();
+  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1, terrain: look.terrain };
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
-  const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; cmdr.ids = []; cmdr.dest = null; cmdr.refresh(); audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim);
+  const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; cmdr.ids = []; cmdr.dest = null; cmdr.refresh(); audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim, look);
   battle.setQuality(coarse ? 0.35 : 1); flags = new Standards(scene, sim, cols(), reduced); applyColors();
   G.sim = sim; G.battle = battle; if (sim.setSpeed) sim.setSpeed(speed); $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
@@ -72,6 +75,10 @@ function runSweep(dt) {
 // ---- UI
 const sel = $('size'); sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide;
 sel.addEventListener('change', () => start(+sel.value));
+for (const [id, set, key] of [['terrain', TERRAINS, 'terrain'], ['weather', WEATHERS, 'weather'], ['time', TIMES, 'time']]) {
+  const el = $(id); el.innerHTML = Object.entries(set).map(([k, v]) => `<option value="${k}">${v}</option>`).join(''); el.value = look[key];
+  el.addEventListener('change', () => { look[key] = el.value; if (key === 'terrain') start(perSide); else battle.setLook(look.time, look.weather); });
+}
 const pauseBtn = $('pause'), muteBtn = $('mute');
 function setPaused(p) { G.paused = p; audio.setPaused(p); if (sim && sim.setPaused) sim.setPaused(p); pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
 function setMuted(m) { audio.setMuted(m); muteBtn.setAttribute('aria-pressed', m); muteBtn.textContent = m ? 'Sound off' : 'Sound on'; }
@@ -137,6 +144,7 @@ function hud() {
 }
 G.step = (ticks = 1) => { if (!G.worker) for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
 G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };
+G.look = look; G.setLook = (o) => { Object.assign(look, o); battle.setLook(look.time, look.weather); };
 G.renderer = renderer; G.setCam = setCam; G.restart = start; G.setPaused = setPaused; G.fly = fly; G.camera = camera;
 G.manual = qs.has('manual');
 start(perSide); setMuted(true);
