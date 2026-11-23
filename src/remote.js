@@ -13,7 +13,8 @@ export class RemoteSim {
     this.worker.postMessage({ type: 'init', opts });
     this.acc = 0;
   }
-  advance() { this.hitEvents.length = 0; const a = (performance.timeOrigin + performance.now() - this.meta[0]) / (this.TICK * 1000); this.acc = Math.min(1, Math.max(0, a)) * this.TICK; return this.paused ? 0 : Math.min(1.2, Math.max(0, a)); }
+  advance() { this.hitEvents.length = 0; const a = (performance.timeOrigin + performance.now() - this.meta[0]) / (this.meta[2] || this.TICK * 1000); this.acc = Math.min(1, Math.max(0, a)) * this.TICK; return this.paused ? 0 : Math.min(1.2, Math.max(0, a)); }
+  setSpeed(v) { this.worker.postMessage({ type: 'speed', v }); }
   setPaused(v) { this.paused = v; this.worker.postMessage({ type: 'pause', v }); }
   winner() { return this.alive[0] === 0 ? 1 : this.alive[1] === 0 ? 0 : -1; }
   terminate() { this.worker.terminate(); }

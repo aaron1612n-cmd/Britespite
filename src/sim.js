@@ -92,7 +92,7 @@ export class Sim {
     }
   }
   /** advance by real dt (fixed 20 Hz internal ticks) */
-  advance(dt) { this.acc += dt; let k = 0; while (this.acc >= TICK && k < 4) { this.tick(TICK); this.acc -= TICK; k++; } if (k === 4) this.acc = 0; return this.acc / TICK; }
+  advance(dt, speed = 1) { this.acc += dt * speed; const cap = 4 * Math.ceil(speed); let k = 0; while (this.acc >= TICK && k < cap) { this.tick(TICK); this.acc -= TICK; k++; } if (k === cap) this.acc = 0; return this.acc / TICK; }
   tick(dt) {
     const n = this.n, c = this.cells; this.time += dt; this.tickCount++; this.meta[0] = performance.timeOrigin + performance.now(); this.meta[1] = this.tickCount; this.hitEvents.length = 0;
     this.buildGrid();

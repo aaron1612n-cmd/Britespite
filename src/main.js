@@ -38,7 +38,7 @@ async function start(n) {
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
   const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; G.worker = useWorker; battle = new Battlefield(scene, sim);
   battle.setQuality(coarse ? 0.35 : 1);
-  G.sim = sim; G.battle = battle; $('banner').style.display = 'none';
+  G.sim = sim; G.battle = battle; if (sim.setSpeed) sim.setSpeed(speed); $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
   G.view = { front: [w * 0.08, 9, rz, 0, 3, 90], over: [0, Math.max(50, w * 0.5), rz - w * 0.25, 0, 0, 60], ground: [-w * 0.5 + 8, 2.0, -86, -w * 0.5 + 40, 2.2, -82] };
   setCam(reduced || testMode ? 'front' : null);
@@ -61,16 +61,19 @@ const pauseBtn = $('pause'), muteBtn = $('mute');
 function setPaused(p) { G.paused = p; if (sim && sim.setPaused) sim.setPaused(p); pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
 function setMuted(m) { audio.setMuted(m); muteBtn.setAttribute('aria-pressed', m); muteBtn.textContent = m ? 'Sound off' : 'Sound on'; }
 pauseBtn.onclick = () => setPaused(!G.paused); muteBtn.onclick = () => setMuted(!audio.muted); $('restart').onclick = () => start(perSide);
+const SPEEDS = [1, 2, 4, 8], ffBtn = $('ff'); let speed = 1;
+function setSpeed(v) { speed = v; ffBtn.textContent = v + '×'; ffBtn.setAttribute('aria-pressed', v > 1); if (sim && sim.setSpeed) sim.setSpeed(v); G.speed = v; }
+ffBtn.onclick = () => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]);
 const hint = $('hint'); let tut = 0;
 const TUT = coarse
-  ? ['Left pad: fly. Drag anywhere else: look.', '▲ ▼ change height. » is turbo.', 'Fly down to the front line and watch them fight.']
-  : ['Click to look around. WASD flies, Space / C up and down.', 'Shift is turbo. Mouse wheel changes speed.', 'Keys 1, 2, 3 jump to the field. P pauses, M sound.'];
+  ? ['Left pad: fly. Drag anywhere else: look.', '▲ ▼ change height. » is turbo.', '» is turbo. 1× / 2× speeds up the battle. Fly down to the front line.']
+  : ['Click to look around. WASD flies, Space / C up and down.', 'Shift is turbo. Mouse wheel changes speed.', 'Keys 1, 2, 3 jump to the field. F fast-forwards, P pauses, M sound.'];
 function showTut(i) { tut = i; if (i >= TUT.length) { hint.classList.add('off'); return; } hint.textContent = TUT[i]; hint.classList.remove('off'); }
 $('help').onclick = () => { setCam('front'); showTut(0); tutT = 0; };
 showTut(0); let tutT = 0, tutMoved = false;
 addEventListener('keydown', (e) => {
   audio.start(); if (e.repeat) return;
-  if (e.code === 'KeyP') setPaused(!G.paused); else if (e.code === 'KeyM') setMuted(!audio.muted); else if (e.code === 'KeyR') start(perSide); else if (e.code === 'KeyH') $('help').click();
+  if (e.code === 'KeyP') setPaused(!G.paused); else if (e.code === 'KeyF') ffBtn.click(); else if (e.code === 'KeyM') setMuted(!audio.muted); else if (e.code === 'KeyR') start(perSide); else if (e.code === 'KeyH') $('help').click();
   else if (e.code === 'Digit1') setCam('front'); else if (e.code === 'Digit2') setCam('over'); else if (e.code === 'Digit3') setCam('ground');
 });
 addEventListener('pointerdown', () => { if (!audio.ctx && !audio.muted) audio.start(); }, { once: false });
@@ -82,7 +85,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now; G.frame++;
   runSweep(dt); fly.update(dt); if (!sim) return;
   let alpha = 0;
-  if (!G.paused && !G.manual) alpha = sim.advance(dt); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
+  if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
   battle.update(camera, alpha);
   renderer.render(scene, camera);
   fAcc += dt; fN++;
