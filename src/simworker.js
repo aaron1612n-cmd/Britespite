@@ -10,7 +10,7 @@ onmessage = (e) => {
   if (m.type === 'init') {
     clearTimeout(timer); sim = new Sim({ ...m.opts, shared: true }); const bufs = {};
     for (const k of sim.fieldNames) bufs[k] = sim[k].buffer;
-    postMessage({ type: 'ready', n: sim.n, world: sim.world, mode: sim.mode, perSide: sim.perSide, bufs });
+    postMessage({ type: 'ready', n: sim.n, world: sim.world, mode: sim.mode, perSide: sim.perSide, typeCount: sim.typeCount, bufs });
     next = performance.now(); loop();
   } else if (m.type === 'pause') paused = m.v;
   else if (m.type === 'order') sim.command(m.ids, m.kind, m.x, m.z);
