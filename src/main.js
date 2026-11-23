@@ -31,7 +31,7 @@ const look = { terrain: pick(qs.get('terrain'), TERRAINS, 'flat'), weather: pick
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && !testMode, powerPreference: 'high-performance' });
 renderer.setClearColor(THEME.haze); // any frame that fails to draw shows haze, never black
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75));
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75)); // adapt() may lower this under load
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 6000);
 const fly = new FlyCam(camera, canvas);
@@ -185,7 +185,11 @@ function tick(now) {
 function adapt() {
   const q = coarse ? 0.35 : 1, b = battle; if (G.fps === 0) return;
   const f = G.fps < 40 ? 0.85 : G.fps > 57 ? 1.06 : 1; b.scale = Math.min(q * 1.6, Math.max(0.25, (b.scale ?? q) * f)); b.setQuality(b.scale);
+  // still slow with the soldier budget at its floor: render fewer pixels (down to 60%), and win them back when there is room
+  if (!testMode) { if (G.fps < 38 && b.scale <= 0.3 && res > 0.6) setRes(Math.max(0.6, res * 0.88)); else if (G.fps > 57 && res < 1) setRes(Math.min(1, res * 1.06)); }
 }
+const PR = Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75); let res = 1;
+function setRes(r) { res = G.res = r; renderer.setPixelRatio(PR * r); }
 function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
   const c = battle.counts, ach = sim.achieved || 1, behind = speed > 1 && !G.paused && ach < speed * 0.92;
