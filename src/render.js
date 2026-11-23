@@ -207,7 +207,7 @@ export class Battlefield {
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(5000, 24, 12), m); this.sky.frustumCulled = false; this.scene.add(this.sky);
   }
   update(camera, alpha) {
-    const s = this.sim, n = s.n, dt = alpha * s.TICK, q = this.q; if (this.siege) this.siege.update();
+    const s = this.sim, n = s.n, dt = alpha * (s.stepDt || s.TICK), q = this.q; if (this.siege) this.siege.update();
     camera.updateMatrixWorld(); const e = camera.matrixWorld.elements;
     const cx = e[12], cy = e[13], cz = e[14], rx = e[0], ry = e[1], rz = e[2], ux = e[4], uy = e[5], uz = e[6], fx = -e[8], fy = -e[9], fz = -e[10];
     const ty = Math.tan((camera.fov * Math.PI) / 360) * 1.1, tx = ty * camera.aspect;

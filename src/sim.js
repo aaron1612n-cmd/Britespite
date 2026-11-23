@@ -3,6 +3,7 @@ import { CLIP, CLIPS } from './clips.js';
 import { setTerrain, cellOf } from './terrain.js';
 import { slots, FORMATIONS } from './formations.js';
 import { SiegeRules } from './siegerules.js';
+import { Pacer } from './pacer.js';
 
 export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
 const MR = 2, ROUT_AT = 0.16, RALLY_AT = 0.5, CELL = 2, REACH = 2.3, SEP = 0.9, SEP2 = SEP * SEP, AGGRO = 26, TICK = 0.05;
@@ -29,7 +30,7 @@ export class Sim {
     this.elev = A(Float32Array, n); this.prog = A(Float32Array, n).fill(-1); this.role = A(Uint8Array, n); this.lad = A(Int8Array, n).fill(-1); this.sg = A(Float32Array, 16);
     this.tgt = A(Int32Array, n).fill(-1); this.deadQ = []; this.deadHead = 0;
     this.alive = A(Int32Array, 2); this.alive[0] = this.alive[1] = perSide; this.deaths = A(Int32Array, 2);
-    this.meta = A(Float64Array, 4); this.hits = 0; this.hitEvents = []; // {x,z,kill}
+    this.meta = A(Float64Array, 8); this.stepDt = TICK; this.achieved = 1; this.hits = 0; this.hitEvents = []; // {x,z,kill}
     this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta','elev','prog','role','lad','sg'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n); this.sx = new Float32Array(n); this.sz = new Float32Array(n); this.sf = new Uint8Array(n);
     this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0]; this.over = -1; // over: -1 running, else winning team
@@ -152,8 +153,14 @@ export class Sim {
     }
     return m;
   }
-  /** advance by real dt (fixed 20 Hz internal ticks) */
-  advance(dt, speed = 1) { this.acc += dt * speed; const cap = 4 * Math.ceil(speed); let k = 0; while (this.acc >= TICK && k < cap) { this.tick(TICK); this.acc -= TICK; k++; } if (k === cap) this.acc = 0; return this.acc / TICK; }
+  /** advance by real dt at `speed` x. Time-boxed so a heavy tick can never freeze the page; widens the step when it cannot keep up (see pacer.js). */
+  advance(dt, speed = 1) {
+    const pc = this.pacer || (this.pacer = new Pacer(this.mode !== 'siege')), t0 = performance.now(); this.owed = (this.owed || 0) + dt * speed;
+    const h = TICK * pc.pick(speed); let done = 0;
+    while (this.owed >= h && performance.now() - t0 < 14) { const a = performance.now(); this.tick(h); pc.note(performance.now() - a); this.owed -= h; done += h; }
+    if (this.owed > 2 * h) this.owed = 2 * h; // cannot keep up: drop the backlog, report the real speed
+    pc.tally(done, dt); this.stepDt = h; this.meta[3] = h; this.meta[4] = pc.achieved; this.achieved = pc.achieved; this.acc = this.owed; return this.owed / h;
+  }
   tick(dt) {
     const n = this.n, c = this.cells; this.time += dt; this.tickCount++; this.meta[0] = performance.timeOrigin + performance.now(); this.meta[1] = this.tickCount; this.hitEvents.length = 0;
     if (this.siege) this.siege.pre(dt);

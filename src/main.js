@@ -149,7 +149,7 @@ function frame(now) {
   if (dir.active && dir.userTookOver()) { dir.stopReplay(); dir.setMode('free'); }
   runSweep(dt); if (!dir.active) fly.update(dt); if (!sim) return;
   let alpha = 0;
-  if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
+  if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / (sim.stepDt || sim.TICK);
   if (!G.paused) dir.rec.record(sim, dt);
   const rs = dir.update(dt, sim, alpha); battle.sim = rs || sim; battle.update(camera, rs ? 0 : alpha); battle.sim = sim; if (flags) { flags.update(dt, now / 1000); }
   cmdr.draw(reduced);
@@ -173,7 +173,9 @@ function adapt() {
 }
 function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
-  const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
+  const c = battle.counts, ach = sim.achieved || 1, behind = speed > 1 && !G.paused && ach < speed * 0.92;
+  $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}` + (speed > 1 ? `\nspeed ${ach.toFixed(1)}× of ${speed}×${behind ? ' (CPU limit)' : ''}` : '');
+  ffBtn.textContent = behind ? `${speed}× · ${ach.toFixed(1)}×` : speed + '×'; ffBtn.title = behind ? `Fast forward (F). This battle is too big for ${speed}×; running at ${ach.toFixed(1)}×` : 'Fast forward (F)'; G.achieved = ach;
   if (flags) flags.refresh(false);
   const al = sim.alive, de = sim.deaths, P = G.init[0], P1 = G.init[1], t = (id, v) => ($(id).textContent = v.toLocaleString());
   t('sa', al[0]); t('sb', al[1]); t('ka', de[1]); t('kb', de[0]); t('xa', de[0]); t('xb', de[1]);

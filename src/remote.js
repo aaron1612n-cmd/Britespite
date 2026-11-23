@@ -13,7 +13,9 @@ export class RemoteSim {
     this.worker.postMessage({ type: 'init', opts });
     this.acc = 0;
   }
-  advance() { this.hitEvents.length = 0; const a = (performance.timeOrigin + performance.now() - this.meta[0]) / (this.meta[2] || this.TICK * 1000); this.acc = Math.min(1, Math.max(0, a)) * this.TICK; return this.paused ? 0 : Math.min(1.2, Math.max(0, a)); }
+  get stepDt() { return this.meta[3] || this.TICK; }
+  get achieved() { return this.meta[4] || 1; }
+  advance() { this.hitEvents.length = 0; const a = (performance.timeOrigin + performance.now() - this.meta[0]) / (this.meta[2] || this.TICK * 1000); this.acc = Math.min(1, Math.max(0, a)) * this.stepDt; return this.paused ? 0 : Math.min(1.2, Math.max(0, a)); }
   command(ids, kind, x, z) { const a = Int32Array.from(ids); this.worker.postMessage({ type: 'order', ids: a, kind, x, z }, [a.buffer]); return ids.length; }
   setSpeed(v) { this.worker.postMessage({ type: 'speed', v }); }
   setPaused(v) { this.paused = v; this.worker.postMessage({ type: 'pause', v }); }
