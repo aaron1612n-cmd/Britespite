@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import './ui.css';
 import { THEME, applyTheme } from './theme.js';
 import { Sim } from './sim.js';
 import { RemoteSim } from './remote.js';
@@ -100,6 +101,8 @@ const panel = $('panel'), statsBtn = $('statsBtn'); let showStats = true;
 function setStats(v) { showStats = v; panel.hidden = !v; statsBtn.setAttribute('aria-pressed', v); }
 statsBtn.onclick = () => setStats(!showStats); setStats(true);
 $('restart').onclick = () => start(perSide);
+const setupBtn = $('setupBtn'), setupEl = $('setup');
+setupBtn.onclick = () => { const o = setupEl.hidden; setupEl.hidden = !o; setupBtn.setAttribute('aria-pressed', o); setupBtn.setAttribute('aria-expanded', o); };
 const SPEEDS = [1, 2, 4, 8], ffBtn = $('ff'); let speed = 1;
 function setSpeed(v) { speed = v; ffBtn.textContent = v + '×'; ffBtn.setAttribute('aria-pressed', v > 1); if (sim && sim.setSpeed) sim.setSpeed(v); G.speed = v; }
 ffBtn.onclick = () => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]);
