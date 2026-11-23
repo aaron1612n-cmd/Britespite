@@ -4,10 +4,11 @@ import { buildSoldier } from './model.js';
 import { bakeAll } from './rig.js';
 import { NB } from './skeleton.js';
 import { CLIPS, CLIP } from './clips.js';
-import { ground, heightAt, analyticHeightAt, setTerrain, forestAt, waterKind, treeSpots, WATER_Y, RIVER_HALF } from './terrain.js';
+import { ground, heightAt, analyticHeightAt, setTerrain, forestAt, waterKind, treeSpots, TREE_CAP, WATER_Y, RIVER_HALF } from './terrain.js';
 import { Atmosphere, FOG_BASE } from './atmosphere.js';
 import { ST } from './sim.js';
 import { SiegeScene } from './siegescene.js';
+import { SHADE_GLSL, normalSamples, meanLit } from './shade.js';
 
 const col = (hex) => new THREE.Color(hex);
 const FOG = FOG_BASE;
@@ -56,21 +57,20 @@ void main() {
 }`;
 const COMMON_FS = /* glsl */`
 precision highp float;
+${SHADE_GLSL}
 uniform vec3 uPal[10]; uniform vec3 uTeam[4]; uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uAmbS; uniform vec3 uAmbG; uniform vec3 uFog; uniform float uFogD;
 varying vec3 vN; varying float vMat; varying float vSeed; varying float vTeam; varying float vLY; varying float vDepth;
 void main() {
   int m = int(vMat + 0.5); vec3 base = uPal[m];
   int t = int(vTeam + 0.5);
   if (m == 1) base = uTeam[t * 2]; else if (m == 5) base = uTeam[t * 2 + 1];
-  float v = 0.9 + 0.2 * fract(vSeed * 91.7); if (m == 0) base *= 0.88 + 0.24 * fract(vSeed * 37.1);
+  float v = 0.92 + 0.16 * fract(vSeed * 91.7); if (m == 0) base *= 0.94 + 0.12 * fract(vSeed * 37.1);
   base *= v;
   vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
-  float d = max(dot(n, uSun), 0.0);
-  vec3 amb = mix(uAmbG, uAmbS, n.y * 0.5 + 0.5);
-  float ao = mix(0.62, 1.0, smoothstep(0.0, 0.9, vLY));
-  vec3 c = base * (amb * ao + uSunCol * d);
+  vec3 c = base * shadeSoldier(n, vLY, uSun, uSunCol, uAmbS, uAmbG);
   float f = 1.0 - exp(-uFogD * uFogD * vDepth * vDepth); c = mix(c, uFog, f);
   gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
 }`;
 const IMP_VS = /* glsl */`
 precision highp float;
@@ -104,11 +104,12 @@ void main() {
     if (d > 0.0) discard;
     c = tun;
     if (extra < 0.0 && head > 0.0) c = ut == 4 ? (seg(p, vec2(0.3, 0.9), vec2(0.5, 0.9), 0.055) < 0.0 ? acc * 1.4 : vec3(0.4, 0.3, 0.2)) : acc;
-    else if (head < 0.0) c = vec3(0.62, 0.45, 0.2); else if (legs < 0.0 && body > 0.0) c = uSkin * 0.8; else if (spear < 0.0 && body > 0.0) c = vec3(0.4, 0.3, 0.2);
+    else if (head < 0.0) c = uSkin; else if (legs < 0.0 && body > 0.0) c = uSkin * 0.8; else if (spear < 0.0 && body > 0.0) c = vec3(0.4, 0.3, 0.2);
   }
-  c *= (0.72 + 0.4 * fract(vSeed * 91.7)) * uTone;
+  c *= (0.92 + 0.16 * fract(vSeed * 91.7)) * uTone;
   float f = 1.0 - exp(-uFogD * uFogD * vDepth * vDepth); c = mix(c, uFog, f);
   gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
 }`;
 
 function instanced(src, max, withC) {
@@ -136,6 +137,9 @@ export class Battlefield {
     this.meshesNear = this.nearT.map((o) => new THREE.Mesh(o.g, mkMat({ SMOOTH: 1, TWOBONE: 1, BLEND: 1 })));
     this.meshesMid = this.midT.map((o) => new THREE.Mesh(o.g, mkMat({ SMOOTH: 1, TWOBONE: 1 })));
     this.meshNear = this.meshesNear[0]; this.meshMid = this.meshesMid[0];
+    this.litSamples = normalSamples(fulls[0], 1); this.lit = { mean: [1, 1, 1], lo: 1, hi: 1 };
+    // per-soldier LOD memory: radius jitter spreads the switch over a wide band (no visible ring), hysteresis stops flicker
+    this.lod = new Uint8Array(n).fill(2); this.jit = new Float32Array(n); for (let i = 0; i < n; i++) { const h = Math.sin(i * 12.9898 + (sim.seed ? sim.seed[i] : 0) * 78.233) * 43758.5453; this.jit[i] = 0.7 + 0.6 * (h - Math.floor(h)); }
     // far impostors
     const ig = new THREE.InstancedBufferGeometry(); ig.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
     ig.setAttribute('corner', new THREE.Float32BufferAttribute([-0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5], 2)); ig.setIndex([0, 1, 2, 0, 2, 3]);
@@ -147,12 +151,17 @@ export class Battlefield {
     this.q = { nearR: 26, midR: 100, nearCap: 900, midCap: 5000 };
     this.counts = { near: 0, mid: 0, far: 0, culled: 0 };
     setTerrain(look.terrain || 'flat', sim.world);
-    ground.flat = sim.mode === 'siege'; this.buildTerrain(sim.world); this.buildSky(); this.buildWater(); this.buildTrees(look.coarse ? 500 : 1500);
+    ground.flat = sim.mode === 'siege'; this.buildTerrain(sim.world); this.buildSky(); this.buildWater(); this.buildTrees(TREE_CAP);
     scene.fog = new THREE.FogExp2(THEME.haze, FOG);
     this.hemi = new THREE.HemisphereLight(0xcfe0f0, 0x6a6a4a, 1.0); scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff0d8, 2.2); this.sun.position.copy(sun).multiplyScalar(100); scene.add(this.sun);
-    this.atmo = new Atmosphere(this, look);
+    this.atmo = new Atmosphere(this, look); this.refreshImpLit();
     if (ground.flat) this.siege = new SiegeScene(scene, sim);
+  }
+  /** far billboards get the mean of the shader's lighting so they match the meshes (called when the light changes) */
+  refreshImpLit() {
+    const u = this.uniforms, v = (a) => ({ x: a.x, y: a.y, z: a.z }), sc = u.uSunCol.value;
+    this.lit = meanLit(this.litSamples, v(u.uSun.value), { x: sc.x, y: sc.y, z: sc.z }, v(u.uAmbS.value), v(u.uAmbG.value)); u.uTone.value.set(...this.lit.mean);
   }
   setLook(time, weather) { this.atmo.set(time, weather); }
   dispose() {
@@ -222,19 +231,20 @@ export class Battlefield {
     const m = new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, fog: false,
       uniforms: { top: { value: col('#5f8cb8') }, hor: { value: col(THEME.haze) }, uSun: { value: new THREE.Vector3(0, 1, 0) }, uGlow: { value: new THREE.Color(0, 0, 0) } },
       vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'uniform vec3 top; uniform vec3 hor; uniform vec3 uSun; uniform vec3 uGlow; varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = clamp(d.y, 0.0, 1.0); float g = max(dot(d, uSun), 0.0); vec3 c = mix(hor, top, pow(h, 0.55)) + uGlow * (pow(g, 8.0) * 0.6 + pow(g, 220.0)); gl_FragColor = vec4(c, 1.0); }' });
+      fragmentShader: 'uniform vec3 top; uniform vec3 hor; uniform vec3 uSun; uniform vec3 uGlow; varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = clamp(d.y, 0.0, 1.0); float g = max(dot(d, uSun), 0.0); vec3 c = mix(hor, top, pow(h, 0.55)) + uGlow * (pow(g, 8.0) * 0.6 + pow(g, 220.0)); gl_FragColor = vec4(c, 1.0);\n#include <colorspace_fragment>\n}' });
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(5000, 24, 12), m); this.sky.frustumCulled = false; this.scene.add(this.sky);
   }
   update(camera, alpha) {
     const s = this.sim, n = s.n, dt = alpha * (s.stepDt || s.TICK), q = this.q; if (this.siege) this.siege.update();
     camera.updateMatrixWorld(); const e = camera.matrixWorld.elements;
     const cx = e[12], cy = e[13], cz = e[14], rx = e[0], ry = e[1], rz = e[2], ux = e[4], uy = e[5], uz = e[6], fx = -e[8], fy = -e[9], fz = -e[10];
+    if (!Number.isFinite(cx + cy + cz + rx + ry + rz + ux + uy + uz + fx + fy + fz)) return; // never cull against a broken camera
     const ty = Math.tan((camera.fov * Math.PI) / 360) * 1.1, tx = ty * camera.aspect;
     this.uniforms.uRight.value.set(rx, 0, rz).normalize(); this.sky.position.set(cx, cy, cz); this.atmo.update(camera);
     const nr2 = q.nearR * q.nearR, mr2 = q.midR * q.midR;
     let a = 0, b = 0, f = 0, cull = 0; const NT = this.nearT, MT = this.midT, an = this.an || (this.an = [0, 0, 0, 0, 0]), bn = this.bn || (this.bn = [0, 0, 0, 0, 0]); an.fill(0); bn.fill(0);
     const FA = this.far.A.array, FB = this.far.B.array;
-    const { x, z, vx, vz, yaw, state, clip, animT, prevClip, prevT, blend, team, seed, removed, utype, elev } = s;
+    const { x, z, vx, vz, yaw, state, clip, animT, prevClip, prevT, blend, team, seed, removed, utype, elev } = s, lod = this.lod;
     for (let i = 0; i < n; i++) {
       if (removed[i]) continue;
       const dead = state[i] === ST.DEAD, px = dead ? x[i] : x[i] + vx[i] * dt, pz = dead ? z[i] : z[i] + vz[i] * dt;
@@ -246,14 +256,16 @@ export class Battlefield {
       const d2 = dx * dx + dz * dz + dy * dy, y = heightAt(px, pz) + elev[i], ut = utype[i];
       const cl = CLIPS[clip[i]]; let t = animT[i] + (cl.speed ? dt * Math.min(1.8, Math.max(0.4, Math.hypot(vx[i], vz[i]) / cl.speed)) : dt);
       if (cl.loop) { if (t > cl.dur) t -= cl.dur; } else if (t > cl.dur) t = cl.dur;
-      if (d2 < nr2 && a < q.nearCap) {
+      const k = this.jit[i], lo = lod[i], kn = k * k * (lo === 0 ? 1.3 : 1), km = k * k * (lo <= 1 ? 1.3 : 1);
+      if (d2 < 1.2 && Math.abs(dy) < 1.5) { cull++; continue; } // camera inside a soldier: skip it instead of filling the view
+      if (d2 < nr2 * kn && a < q.nearCap) { lod[i] = 0;
         const o = an[ut]++ * 4, A = NT[ut].A.array, Bb = NT[ut].B.array, C = NT[ut].C.array; A[o] = px; A[o + 1] = y; A[o + 2] = pz; A[o + 3] = yaw[i];
         Bb[o] = clip[i]; Bb[o + 1] = t; Bb[o + 2] = team[i]; Bb[o + 3] = seed[i];
         C[o] = prevClip[i]; C[o + 1] = prevT[i]; C[o + 2] = Math.min(1, blend[i] + dt / 0.18); a++;
-      } else if (d2 < mr2 && b < q.midCap) {
+      } else if (d2 < mr2 * km && b < q.midCap) { lod[i] = 1;
         const o = bn[ut]++ * 4, A = MT[ut].A.array, Bb = MT[ut].B.array; A[o] = px; A[o + 1] = y; A[o + 2] = pz; A[o + 3] = yaw[i];
         Bb[o] = clip[i]; Bb[o + 1] = t; Bb[o + 2] = team[i]; Bb[o + 3] = seed[i]; b++;
-      } else {
+      } else { lod[i] = 2;
         const o = f * 4; FA[o] = px; FA[o + 1] = y; FA[o + 2] = pz; FA[o + 3] = yaw[i];
         FB[o] = clip[i]; FB[o + 1] = t; FB[o + 2] = team[i] + 2 * ut; FB[o + 3] = seed[i]; f++;
       }
@@ -267,8 +279,8 @@ export class Battlefield {
       up(ar, k, [ar.A, ar.B]); this.arrowMesh.visible = k > 0; this.counts.arrows = k; }
     this.counts.near = a; this.counts.mid = b; this.counts.far = f; this.counts.culled = cull;
     // adapt LOD radii so counts hover under their caps
-    q.nearR = Math.min(60, Math.max(8, q.nearR * (a >= q.nearCap ? 0.96 : a < q.nearCap * 0.7 ? 1.015 : 1)));
-    q.midR = Math.min(260, Math.max(q.nearR + 20, q.midR * (b >= q.midCap ? 0.96 : b < q.midCap * 0.7 ? 1.015 : 1)));
+    q.nearR = Math.min(60, Math.max(8, q.nearR * (a >= q.nearCap ? 0.985 : a < q.nearCap * 0.7 ? 1.008 : 1)));
+    q.midR = Math.min(260, Math.max(q.nearR + 20, q.midR * (b >= q.midCap ? 0.985 : b < q.midCap * 0.7 ? 1.008 : 1)));
   }
   setTeamColors(a, b) {
     const t = this.uniforms.uTeam.value; t[0].set(a); t[1].set(a).multiplyScalar(0.62); t[2].set(b); t[3].set(b).multiplyScalar(0.62);

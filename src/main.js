@@ -30,6 +30,7 @@ const pick = (v, set, d) => (v in set ? v : d);
 const look = { terrain: pick(qs.get('terrain'), TERRAINS, 'flat'), weather: pick(qs.get('weather'), WEATHERS, 'clear'), time: pick(qs.get('time'), TIMES, 'day'), reduced, coarse };
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && !testMode, powerPreference: 'high-performance' });
+renderer.setClearColor(THEME.haze); // any frame that fails to draw shows haze, never black
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 6000);
@@ -150,9 +151,16 @@ addEventListener('pointerdown', () => { if (!audio.ctx && !audio.muted) audio.st
 
 // ---- loop
 let ev = 0, last = performance.now(), fAcc = 0, fN = 0, statT = 0;
+let fails = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.1, (now - last) / 1000); last = now; G.frame++;
+  try { tick(now); fails = 0; } catch (e) { G.errors.push(String(e)); console.error(e); if (++fails === 4) { fails = 0; start(perSide); } } // a thrown frame must not leave the screen dead
+}
+// WebGL can drop the context (GPU reset, memory pressure, tab switch). three.js re-uploads everything on restore; we just say so.
+canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); G.contextLost = true; flash('Graphics reset. Restoring the battle...'); });
+canvas.addEventListener('webglcontextrestored', () => { G.contextLost = false; resize(); if (battle) battle.refreshImpLit(); flash('Graphics restored'); });
+function tick(now) {
+  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)) || 0; last = now; G.frame++;
   if (dir.active && dir.userTookOver()) { dir.stopReplay(); dir.setMode('free'); }
   runSweep(dt); if (!dir.active) fly.update(dt); if (!sim) return;
   let alpha = 0;
@@ -176,7 +184,7 @@ function frame(now) {
 // keep the frame rate smooth by trading near-LOD budget
 function adapt() {
   const q = coarse ? 0.35 : 1, b = battle; if (G.fps === 0) return;
-  const f = G.fps < 40 ? 0.85 : G.fps > 57 ? 1.06 : 1; b.scale = Math.min(q * 1.6, Math.max(0.1, (b.scale ?? q) * f)); b.setQuality(b.scale);
+  const f = G.fps < 40 ? 0.85 : G.fps > 57 ? 1.06 : 1; b.scale = Math.min(q * 1.6, Math.max(0.25, (b.scale ?? q) * f)); b.setQuality(b.scale);
 }
 function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
