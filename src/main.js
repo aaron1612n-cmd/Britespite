@@ -1,0 +1,110 @@
+import * as THREE from 'three';
+import { THEME, applyTheme } from './theme.js';
+import { Sim } from './sim.js';
+import { Battlefield } from './render.js';
+import { FlyCam } from './controls.js';
+import { BattleAudio } from './audio.js';
+import { heightAt } from './terrain.js';
+
+applyTheme();
+const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+const coarse = matchMedia('(pointer:coarse)').matches;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const testMode = qs.has('test');
+const SIZES = [500, 2000, 5000, 10000, 20000, 35000, 50000];
+let perSide = +qs.get('n') || (coarse ? 3000 : 10000);
+if (!SIZES.includes(perSide)) SIZES.push(perSide), SIZES.sort((a, b) => a - b);
+
+const canvas = $('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !coarse && !testMode, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 1.75));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 6000);
+const fly = new FlyCam(camera, canvas);
+const audio = new BattleAudio();
+const G = (window.__GAME__ = { paused: false, fps: 0, frame: 0, errors: [] });
+addEventListener('error', (e) => G.errors.push(String(e.message)));
+
+let sim, battle;
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+function start(n) {
+  perSide = n; if (battle) { for (const m of [battle.meshNear, battle.meshMid, battle.meshFar, battle.terrain, battle.sky]) { scene.remove(m); m.geometry.dispose(); } }
+  scene.clear(); sim = new Sim({ perSide: n, seed: +qs.get('seed') || 1 }); battle = new Battlefield(scene, sim);
+  battle.setQuality(coarse ? 0.35 : 1);
+  G.sim = sim; G.battle = battle; $('banner').style.display = 'none';
+  const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
+  G.view = { front: [w * 0.08, 9, rz, 0, 3, 90], over: [0, Math.max(50, w * 0.5), rz - w * 0.25, 0, 0, 60], ground: [-w * 0.5 + 8, 2.0, -86, -w * 0.5 + 40, 2.2, -82] };
+  setCam(reduced || testMode ? 'front' : null);
+}
+function setCam(name) {
+  if (name) { fly.lookAt(...G.view[name]); sweep = null; return; }
+  const a = G.view.over, b = G.view.front; sweep = { t: 0, a, b }; fly.lookAt(...a);
+}
+let sweep = null;
+function runSweep(dt) {
+  if (!sweep) return; if (fly.input) { sweep = null; return; }
+  sweep.t += dt / 5; const k = Math.min(1, sweep.t), e = k * k * (3 - 2 * k), v = sweep.a.map((x, i) => x + (sweep.b[i] - x) * e);
+  fly.lookAt(...v); if (k >= 1) sweep = null;
+}
+
+// ---- UI
+const sel = $('size'); sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide;
+sel.addEventListener('change', () => start(+sel.value));
+const pauseBtn = $('pause'), muteBtn = $('mute');
+function setPaused(p) { G.paused = p; pauseBtn.setAttribute('aria-pressed', p); pauseBtn.textContent = p ? 'Resume' : 'Pause'; }
+function setMuted(m) { audio.setMuted(m); muteBtn.setAttribute('aria-pressed', m); muteBtn.textContent = m ? 'Sound off' : 'Sound on'; }
+pauseBtn.onclick = () => setPaused(!G.paused); muteBtn.onclick = () => setMuted(!audio.muted); $('restart').onclick = () => start(perSide);
+const hint = $('hint'); let tut = 0;
+const TUT = coarse
+  ? ['Left pad: fly. Drag anywhere else: look.', '▲ ▼ change height. » is turbo.', 'Fly down to the front line and watch them fight.']
+  : ['Click to look around. WASD flies, Space / C up and down.', 'Shift is turbo. Mouse wheel changes speed.', 'Keys 1, 2, 3 jump to the field. P pauses, M sound.'];
+function showTut(i) { tut = i; if (i >= TUT.length) { hint.classList.add('off'); return; } hint.textContent = TUT[i]; hint.classList.remove('off'); }
+$('help').onclick = () => { setCam('front'); showTut(0); tutT = 0; };
+showTut(0); let tutT = 0, tutMoved = false;
+addEventListener('keydown', (e) => {
+  audio.start(); if (e.repeat) return;
+  if (e.code === 'KeyP') setPaused(!G.paused); else if (e.code === 'KeyM') setMuted(!audio.muted); else if (e.code === 'KeyR') start(perSide); else if (e.code === 'KeyH') $('help').click();
+  else if (e.code === 'Digit1') setCam('front'); else if (e.code === 'Digit2') setCam('over'); else if (e.code === 'Digit3') setCam('ground');
+});
+addEventListener('pointerdown', () => { if (!audio.ctx && !audio.muted) audio.start(); }, { once: false });
+
+// ---- loop
+let last = performance.now(), fAcc = 0, fN = 0, statT = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000); last = now; G.frame++;
+  runSweep(dt); fly.update(dt);
+  let alpha = 0;
+  if (!G.paused && !G.manual) alpha = sim.advance(dt); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
+  battle.update(camera, alpha);
+  renderer.render(scene, camera);
+  fAcc += dt; fN++;
+  if (fAcc > 0.5) { G.fps = fN / fAcc; fAcc = 0; fN = 0; adapt(); }
+  if ((statT += dt) > 0.25) { statT = 0; hud(); }
+  // audio
+  if (audio.ctx && !audio.muted) {
+    const hs = []; for (const h of sim.hitEvents) { const d = Math.hypot(h.x - camera.position.x, h.z - camera.position.z, camera.position.y); const v = Math.max(0, 1 - d / 160); if (v > 0.05) hs.push(v); }
+    audio.update(Math.min(1, battle.counts.near / 300 + 0.15), hs);
+  }
+  if (tut < TUT.length && fly.input) { tutT += dt; if (tutT > 3.5) { tutT = 0; showTut(tut + 1); } }
+}
+// keep the frame rate smooth by trading near-LOD budget
+function adapt() {
+  const q = coarse ? 0.35 : 1, b = battle; if (G.fps === 0) return;
+  const f = G.fps < 40 ? 0.85 : G.fps > 57 ? 1.06 : 1; b.scale = Math.min(q * 1.6, Math.max(0.1, (b.scale ?? q) * f)); b.setQuality(b.scale);
+}
+function hud() {
+  $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
+  const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
+  const w = sim.winner(); const bn = $('banner'); if (w >= 0) { bn.style.display = 'block'; bn.textContent = w === 0 ? 'Crimson holds the field' : 'Azure holds the field'; }
+}
+G.step = (ticks = 1) => { for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
+G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };
+G.setCam = setCam; G.restart = start; G.setPaused = setPaused; G.fly = fly; G.camera = camera;
+G.manual = qs.has('manual');
+start(perSide); setMuted(true);
+G.ready = true;
+requestAnimationFrame(frame);
