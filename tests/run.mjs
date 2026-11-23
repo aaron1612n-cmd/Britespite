@@ -230,6 +230,15 @@ try {
     check('siege battle ran in browser', q.gate < 1400 && q.alive[0] <= 500, `gate ${q.gate | 0}, alive ${q.alive}`);
     await sp.close();
   }
+  { // the real (worker) path: shared buffers, fast-forward pacing, no errors
+    const wp = await browser.newPage({ viewport: { width: 640, height: 400 } }); const e3 = []; wp.on('console', (m) => { if (m.type() === 'error') e3.push(m.text()); }); wp.on('pageerror', (e) => e3.push(e.message));
+    await wp.goto('http://localhost:4173/?n=2000'); await wp.waitForFunction(() => window.__GAME__ && window.__GAME__.ready && window.__GAME__.sim, null, { timeout: 30000 });
+    await wp.evaluate(() => { const b = document.getElementById('ff'); while (window.__GAME__.speed !== 4) b.click(); }); await wp.waitForTimeout(3500); await wp.waitForFunction(() => window.__GAME__.achieved > 0, null, { timeout: 10000 });
+    const w = await wp.evaluate(() => { const G = window.__GAME__; return { worker: G.worker, ach: G.sim.achieved, tick: G.sim.meta[1], types: G.sim.typeCount && G.sim.utype.length === G.sim.n }; });
+    check('worker mode boots with shared unit-type data and no console errors', w.worker === true && w.types && e3.length === 0, `worker ${w.worker}, ${e3.slice(0, 2).join(' | ')}`);
+    check('fast-forward 4x reaches about 4x on a small battle', w.ach > 3 && w.ach < 5, `achieved ${w.ach.toFixed(2)}x, tick ${w.tick}`);
+    await wp.close();
+  }
   const ff = await page.evaluate(() => { const b = document.getElementById('ff'); b.click(); const a = b.textContent; b.click(); b.click(); b.click(); return [a, b.textContent]; });
   check('fast-forward button cycles 1x/2x/4x/8x', ff[0] === '2×' && ff[1] === '1×', ff.join(' -> '));
   const cam = await page.evaluate(async () => {

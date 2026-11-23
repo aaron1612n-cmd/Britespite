@@ -64,7 +64,7 @@ export class Sim {
     this.tgt = A(Int32Array, n).fill(-1); this.deadQ = []; this.deadHead = 0;
     this.alive = A(Int32Array, 2); this.alive[0] = this.alive[1] = perSide; this.deaths = A(Int32Array, 2);
     this.meta = A(Float64Array, 8); this.stepDt = TICK; this.achieved = 1; this.hits = 0; this.hitEvents = []; // {x,z,kill}
-    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta','elev','prog','role','lad','sg'];
+    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','utype','apos','adir','alive','deaths','meta','elev','prog','role','lad','sg'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n); this.sx = new Float32Array(n); this.sz = new Float32Array(n); this.sf = new Uint8Array(n);
     this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0]; this.over = -1; // over: -1 running, else winning team
     // morale (sim-internal, not shared): 1 = steady, below ROUT_AT the unit breaks and runs
