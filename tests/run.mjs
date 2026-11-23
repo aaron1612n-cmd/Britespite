@@ -68,6 +68,12 @@ check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, 
   const dead = [...Array(a.n).keys()].filter((i) => a.state[i] === ST.DEAD && !a.removed[i]);
   check('dead units play a death clip', dead.every((i) => a.clip[i] === CLIP.DIE_BACK || a.clip[i] === CLIP.DIE_FWD));
 }
+{ // morale: losing side breaks and flees, battle ends instead of grinding on
+  const m = new Sim({ perSide: 400, seed: 5 }); let t = 0; while (m.winner() < 0 && t < 12000) { m.tick(0.05); t++; }
+  check('battle ends naturally with a winner', m.winner() >= 0, `winner ${m.winner()} after ${(t * 0.05).toFixed(0)}s`);
+  check('losers fled rather than all dying', m.fled[0] + m.fled[1] > 20, `fled ${m.fled}, dead ${m.deaths[0]}/${m.deaths[1]}`);
+  check('battle ends within 8 minutes', t * 0.05 < 480, `${(t * 0.05).toFixed(0)}s`);
+}
 {
   const s = new Sim({ perSide: 10000, seed: 2 }); let t = performance.now(); for (let i = 0; i < 400; i++) s.tick(0.05);
   const ms = (performance.now() - t) / 400; check('sim tick under 18 ms for 20,000 soldiers', ms < 18, `${ms.toFixed(1)} ms/tick (20 ticks/s, runs in a worker)`);
