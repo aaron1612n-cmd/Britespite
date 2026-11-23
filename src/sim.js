@@ -1,5 +1,6 @@
 // Headless battle simulation: spatial-hash combat for tens of thousands of spear soldiers.
 import { CLIP, CLIPS } from './clips.js';
+import { slots, FORMATIONS } from './formations.js';
 
 export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
 const MR = 2, ROUT_AT = 0.16, RALLY_AT = 0.5, CELL = 2, REACH = 2.3, SEP = 0.9, AGGRO = 26, TICK = 0.05;
@@ -9,9 +10,10 @@ const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CL
 function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 export class Sim {
-  constructor({ shared = false, perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000 } = {}) {
-    const files0 = Math.ceil(Math.sqrt(perSide * 2.8)), ranks0 = Math.ceil(perSide / files0);
-    world = Math.max(120, Math.max((files0 * spacing) / 2, gap / 2 + ranks0 * spacing) + 70);
+  constructor({ shared = false, formations = ['block', 'block'], perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000 } = {}) {
+    this.formations = formations; this.slots = [slots(formations[0], perSide, rng(seed * 7 + 1)), slots(formations[1], perSide, rng(seed * 7 + 2))];
+    this.fSpd = formations.map((k) => FORMATIONS[k].spd); this.fDef = formations.map((k) => FORMATIONS[k].def);
+    world = Math.max(120, Math.max(this.slots[0].halfWidth, this.slots[1].halfWidth, gap / 2 + Math.max(this.slots[0].depth, this.slots[1].depth)) + 70);
     this.perSide = perSide; this.n = perSide * 2; this.world = world; this.corpseLife = corpseLife; this.corpseCap = corpseCap;
     const n = this.n; const A = (T, m) => (shared ? new T(new SharedArrayBuffer(m * T.BYTES_PER_ELEMENT)) : new T(m)); this.rand = rng(seed); this.time = 0; this.tickCount = 0; this.acc = 0; this.TICK = TICK;
     this.x = A(Float32Array, n); this.z = A(Float32Array, n); this.vx = A(Float32Array, n); this.vz = A(Float32Array, n);
@@ -30,13 +32,15 @@ export class Sim {
     this.layout(spacing, gap);
   }
   layout(spacing, gap) {
-    const N = this.perSide, files = Math.ceil(Math.sqrt(N * 2.8)), ranks = Math.ceil(N / files);
-    for (let t = 0; t < 2; t++) for (let k = 0; k < N; k++) {
-      const i = t * N + k, f = k % files, r = (k / files) | 0, dir = t === 0 ? 1 : -1;
-      this.team[i] = t; this.x[i] = (f - files / 2) * spacing + (this.rand() - 0.5) * 0.3;
-      this.z[i] = -dir * (gap / 2 + r * spacing) + (this.rand() - 0.5) * 0.3; this.yaw[i] = t === 0 ? 0 : Math.PI;
-      this.hp[i] = 90 + this.rand() * 30; this.spd[i] = 0.9 + this.rand() * 0.2; this.seed[i] = this.rand();
-      this.animT[i] = this.rand() * 0.8; this.clip[i] = CLIP.IDLE; this.prevClip[i] = CLIP.IDLE; this.cd[i] = this.rand() * 0.5;
+    const N = this.perSide;
+    for (let t = 0; t < 2; t++) {
+      const sl = this.slots[t], dir = t === 0 ? 1 : -1, jit = t === 0 && this.formations[0] === 'loose' || t === 1 && this.formations[1] === 'loose' ? 0 : 0.3;
+      for (let k = 0; k < N; k++) {
+        const i = t * N + k; this.team[i] = t; this.x[i] = (t === 0 ? 1 : -1) * sl.x[k] + (this.rand() - 0.5) * jit;
+        this.z[i] = -dir * (gap / 2 + sl.d[k]) + (this.rand() - 0.5) * jit; this.yaw[i] = t === 0 ? 0 : Math.PI;
+        this.hp[i] = 90 + this.rand() * 30; this.spd[i] = 0.9 + this.rand() * 0.2; this.seed[i] = this.rand();
+        this.animT[i] = this.rand() * 0.8; this.clip[i] = CLIP.IDLE; this.prevClip[i] = CLIP.IDLE; this.cd[i] = this.rand() * 0.5;
+      }
     }
   }
   cellIdx(x, z) {
@@ -154,7 +158,7 @@ export class Sim {
         if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; this.turn(i, Math.atan2(ex, ez), dt, 8); }
         if (!this.hitDone[i] && stateT[i] >= T_HIT) {
           this.hitDone[i] = 1;
-          if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (REACH + 0.5) ** 2 && this.rand() < 0.7) this.damage(j, 28 + this.rand() * 22, i); }
+          if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (REACH + 0.5) ** 2 && this.rand() < 0.7 - this.fDef[team[j]]) this.damage(j, 28 + this.rand() * 22, i); }
         }
         if (stateT[i] >= D_ATTACK) { state[i] = ST.MOVE; cd[i] = 0.4 + this.rand() * 0.5; }
       } else if (st === ST.HIT) {
@@ -197,7 +201,7 @@ export class Sim {
           if (d < REACH * 0.92) { sp = 0; if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; } }
           else { sp = d > 7 ? 3.4 : 1.6; desX = ex / d; desZ = ez / d; }
         } else { sp = 1.4; const ox = 1 - me, ex = this.cenX[ox] - x[i], ez = this.cenZ[ox] - z[i], l = Math.hypot(ex, ez) || 1; desX = ex / l; desZ = ez / l; this.turn(i, Math.atan2(desX, desZ), dt, 4); }
-        sp *= spd[i];
+        sp *= spd[i] * this.fSpd[me];
         const a = Math.min(1, 5 * dt); vx[i] += (desX * sp - vx[i]) * a; vz[i] += (desZ * sp - vz[i]) * a;
       }
       if (st === ST.ATTACK) { vx[i] *= 0.7; vz[i] *= 0.7; }
