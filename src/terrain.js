@@ -47,7 +47,10 @@ export function setTerrain(id = 'flat', world = 300) {
 export function cellOf(tr, x, z) { const i = clamp((x + tr.world) | 0, 0, tr.W - 1), j = clamp((z + tr.world) | 0, 0, tr.W - 1); return j * tr.W + i; }
 
 /** Ground height, bilinear from the grid inside the world, analytic outside. */
+// Siege scenarios level the ground so the wall walkway is a single height.
+export const ground = { flat: false };
 export function heightAt(x, z) {
+  if (ground.flat) return 0;
   const t = cache; if (!t) return base(x, z);
   const gx = x + t.world - 0.5, gz = z + t.world - 0.5;
   if (gx < 0 || gz < 0 || gx >= t.W - 1 || gz >= t.W - 1) return analyticHeight(x, z);

@@ -7,3 +7,5 @@ Free-camera spear army battle test, built as a Cloudflare Worker serving static 
 - Soldiers are GPU-instanced with baked bone-matrix clips, three LODs (full model, light model, impostor), simulated in a Web Worker with a spatial-hash. `?n=20000` sets soldiers per side.
 - Look tokens live in `src/theme.js`.
 - Cameras: click/tap a soldier (or G for the one at screen centre) to follow; V toggles chase / first person; K auto cinematic camera; Y replays the last seconds in slow motion (speed button cycles 0.4x / 0.15x / 1x); Esc or any fly key returns to free cam. Logic lives in `src/camdirector.js`.
+
+- Siege scenario (`?mode=siege` or the scenario menu): curtain wall with towers and an arched gate, a wheeled battering ram, ladders that get raised and climbed, defenders on the wall dropping stones. Rules in `src/siegerules.js`, prop geometry + shared layout in `src/siege.js`, renderer in `src/siegescene.js`.

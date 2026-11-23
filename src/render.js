@@ -4,9 +4,10 @@ import { buildSoldier } from './model.js';
 import { bakeAll } from './rig.js';
 import { NB } from './skeleton.js';
 import { CLIPS, CLIP } from './clips.js';
-import { heightAt, analyticHeightAt, setTerrain, forestAt, waterKind, treeSpots, WATER_Y, RIVER_HALF } from './terrain.js';
+import { ground, heightAt, analyticHeightAt, setTerrain, forestAt, waterKind, treeSpots, WATER_Y, RIVER_HALF } from './terrain.js';
 import { Atmosphere, FOG_BASE } from './atmosphere.js';
 import { ST } from './sim.js';
+import { SiegeScene } from './siegescene.js';
 
 const col = (hex) => new THREE.Color(hex);
 const FOG = FOG_BASE;
@@ -139,16 +140,17 @@ export class Battlefield {
     this.q = { nearR: 26, midR: 100, nearCap: 900, midCap: 5000 };
     this.counts = { near: 0, mid: 0, far: 0, culled: 0 };
     setTerrain(look.terrain || 'flat', sim.world);
-    this.buildTerrain(sim.world); this.buildSky(); this.buildWater(); this.buildTrees(look.coarse ? 500 : 1500);
+    ground.flat = sim.mode === 'siege'; this.buildTerrain(sim.world); this.buildSky(); this.buildWater(); this.buildTrees(look.coarse ? 500 : 1500);
     scene.fog = new THREE.FogExp2(THEME.haze, FOG);
     this.hemi = new THREE.HemisphereLight(0xcfe0f0, 0x6a6a4a, 1.0); scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff0d8, 2.2); this.sun.position.copy(sun).multiplyScalar(100); scene.add(this.sun);
     this.atmo = new Atmosphere(this, look);
+    if (ground.flat) this.siege = new SiegeScene(scene, sim);
   }
   setLook(time, weather) { this.atmo.set(time, weather); }
   dispose() {
     for (const m of [this.meshNear, this.meshMid, this.meshFar, this.terrain, this.outer, this.sky, this.water, this.trunks, this.crowns]) if (m) { this.scene.remove(m); m.geometry.dispose(); if (m.material.map) m.material.map.dispose(); m.material.dispose(); }
-    this.atmo.dispose(); this.uniforms.uBones.value.dispose();
+    this.atmo.dispose(); this.uniforms.uBones.value.dispose(); if (this.siege) this.siege.dispose();
   }
   buildTerrain(world) {
     const ga = col(THEME.grassA), gb = col(THEME.grassB), c = new THREE.Color(), dry = col('#8f8a55'), floor = col('#4d5a30'), sand = col('#b0a27a'), silt = col('#6d6a55');
@@ -205,23 +207,23 @@ export class Battlefield {
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(5000, 24, 12), m); this.sky.frustumCulled = false; this.scene.add(this.sky);
   }
   update(camera, alpha) {
-    const s = this.sim, n = s.n, dt = alpha * s.TICK, q = this.q;
+    const s = this.sim, n = s.n, dt = alpha * s.TICK, q = this.q; if (this.siege) this.siege.update();
     camera.updateMatrixWorld(); const e = camera.matrixWorld.elements;
     const cx = e[12], cy = e[13], cz = e[14], rx = e[0], ry = e[1], rz = e[2], ux = e[4], uy = e[5], uz = e[6], fx = -e[8], fy = -e[9], fz = -e[10];
     const ty = Math.tan((camera.fov * Math.PI) / 360) * 1.1, tx = ty * camera.aspect;
     this.uniforms.uRight.value.set(rx, 0, rz).normalize(); this.sky.position.set(cx, cy, cz); this.atmo.update(camera);
     const nr2 = q.nearR * q.nearR, mr2 = q.midR * q.midR;
     let a = 0, b = 0, f = 0, cull = 0; const NA = this.near.A.array, NB_ = this.near.B.array, NC = this.near.C.array, MA = this.mid.A.array, MB = this.mid.B.array, FA = this.far.A.array, FB = this.far.B.array;
-    const { x, z, vx, vz, yaw, state, clip, animT, prevClip, prevT, blend, team, seed, removed } = s;
+    const { x, z, vx, vz, yaw, state, clip, animT, prevClip, prevT, blend, team, seed, removed, elev } = s;
     for (let i = 0; i < n; i++) {
       if (removed[i]) continue;
       const dead = state[i] === ST.DEAD, px = dead ? x[i] : x[i] + vx[i] * dt, pz = dead ? z[i] : z[i] + vz[i] * dt;
-      const dx = px - cx, dz = pz - cz, dy = 0.9 - cy;
+      const dx = px - cx, dz = pz - cz, dy = 0.9 + elev[i] - cy;
       const depth = dx * fx + dy * fy + dz * fz;
       if (depth < -3) { cull++; continue; }
       const lim = depth * tx + 3, lx = dx * rx + dy * ry + dz * rz; if (lx > lim || lx < -lim) { cull++; continue; }
       const ly = dx * ux + dy * uy + dz * uz, limy = depth * ty + 3; if (ly > limy || ly < -limy) { cull++; continue; }
-      const d2 = dx * dx + dz * dz + dy * dy, y = heightAt(px, pz);
+      const d2 = dx * dx + dz * dz + dy * dy, y = heightAt(px, pz) + elev[i];
       const cl = CLIPS[clip[i]]; let t = animT[i] + (cl.speed ? dt * Math.min(1.8, Math.max(0.4, Math.hypot(vx[i], vz[i]) / cl.speed)) : dt);
       if (cl.loop) { if (t > cl.dur) t -= cl.dur; } else if (t > cl.dur) t = cl.dur;
       if (d2 < nr2 && a < q.nearCap) {
