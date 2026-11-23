@@ -7,6 +7,7 @@ import { FlyCam } from './controls.js';
 import { BattleAudio } from './audio.js';
 import { heightAt, TERRAINS } from './terrain.js';
 import { TIMES, WEATHERS } from './atmosphere.js';
+import { FORMATIONS, FORMATION_KEYS } from './formations.js';
 import { Standards } from './banners.js';
 import { Commander } from './command.js';
 import { CamDirector } from './camdirector.js';
@@ -51,10 +52,12 @@ G.cmdr = cmdr;
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
+const qf = (qs.get('form') || '').split(',');
+const form = [0, 1].map((i) => (FORMATIONS[qf[i] || qf[0]] ? qf[i] || qf[0] : 'block'));
 let starting = 0;
 async function start(n) {
   perSide = n; const ticket = ++starting; if (sim && sim.terminate) sim.terminate(); sim = null; if (battle) battle.dispose();
-  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1, terrain: look.terrain };
+  if (flags) flags.dispose(); flags = null; scene.clear(); const opts = { perSide: n, seed: +qs.get('seed') || 1, terrain: look.terrain, formations: form.slice() };
   const useWorker = self.crossOriginIsolated && typeof Worker !== 'undefined' && !testMode && !qs.has('sync');
   const s = useWorker ? await new RemoteSim(opts).ready : new Sim(opts); if (ticket !== starting) return; sim = s; cmdr.ids = []; cmdr.dest = null; cmdr.refresh(); audio.reset(); G.hornedEnd = false; G.worker = useWorker; battle = new Battlefield(scene, sim, look);
   battle.setQuality(coarse ? 0.35 : 1); flags = new Standards(scene, sim, cols(), reduced); applyColors();
@@ -77,6 +80,7 @@ function runSweep(dt) {
 
 // ---- UI
 const sel = $('size'); sel.innerHTML = SIZES.map((s) => `<option value="${s}">${(s * 2).toLocaleString()} soldiers</option>`).join(''); sel.value = perSide;
+for (const [id, i] of [['fa', 0], ['fb', 1]]) { const el = $(id); el.innerHTML = FORMATION_KEYS.map((k) => `<option value="${k}">${FORMATIONS[k].name}</option>`).join(''); el.value = form[i]; el.title = 'Formation (applies on restart)'; el.addEventListener('change', () => { form[i] = el.value; start(perSide); }); }
 sel.addEventListener('change', () => start(+sel.value));
 for (const [id, set, key] of [['terrain', TERRAINS, 'terrain'], ['weather', WEATHERS, 'weather'], ['time', TIMES, 'time']]) {
   const el = $(id); el.innerHTML = Object.entries(set).map(([k, v]) => `<option value="${k}">${v}</option>`).join(''); el.value = look[key];

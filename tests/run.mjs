@@ -84,6 +84,16 @@ check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, 
   check('losers fled rather than all dying', m.fled[0] + m.fled[1] > 20, `fled ${m.fled}, dead ${m.deaths[0]}/${m.deaths[1]}`);
   check('battle ends within 8 minutes', t * 0.05 < 480, `${(t * 0.05).toFixed(0)}s`);
 }
+{ // every formation lays out an army without stacking, and each one actually fights
+  const { FORMATION_KEYS } = await import('../src/formations.js');
+  for (const k of FORMATION_KEYS) {
+    const s = new Sim({ perSide: 300, seed: 3, formations: [k, FORMATION_KEYS[(FORMATION_KEYS.indexOf(k) + 1) % 6]] });
+    let bad = 0, close = 0; for (let i = 0; i < s.n; i++) { if (!Number.isFinite(s.x[i]) || Math.abs(s.x[i]) > s.world || Math.abs(s.z[i]) > s.world) bad++; }
+    const idx = [...Array(s.n).keys()]; for (let i = 0; i < s.n; i++) for (let j = i + 1; j < s.n; j++) if (Math.hypot(s.x[i] - s.x[j], s.z[i] - s.z[j]) < 0.35) close++;
+    for (let i = 0; i < 1500; i++) s.tick(0.05);
+    check(`formation ${k}: valid layout, no stacking, fights`, bad === 0 && close < 10 && s.deaths[0] + s.deaths[1] > 0, `${close} too-close pairs, deaths ${s.deaths[0]}/${s.deaths[1]}`);
+  }
+}
 {
   const s = new Sim({ perSide: 10000, seed: 2 }); let t = performance.now(); for (let i = 0; i < 400; i++) s.tick(0.05);
   const ms = (performance.now() - t) / 400; check('sim tick under 18 ms for 20,000 soldiers', ms < 18, `${ms.toFixed(1)} ms/tick (20 ticks/s, runs in a worker)`);
