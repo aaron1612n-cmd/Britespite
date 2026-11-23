@@ -1,5 +1,6 @@
 // Headless battle simulation: spatial-hash combat for tens of thousands of spear soldiers.
 import { CLIP, CLIPS } from './clips.js';
+import { setTerrain, cellOf } from './terrain.js';
 import { slots, FORMATIONS } from './formations.js';
 
 export const ST = { MOVE: 0, ATTACK: 1, HIT: 2, DEAD: 3, CHEER: 4 };
@@ -10,10 +11,11 @@ const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CL
 function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 export class Sim {
-  constructor({ shared = false, formations = ['block', 'block'], perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000 } = {}) {
+  constructor({ shared = false, formations = ['block', 'block'], terrain = 'flat', perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000 } = {}) {
     this.formations = formations; this.slots = [slots(formations[0], perSide, rng(seed * 7 + 1)), slots(formations[1], perSide, rng(seed * 7 + 2))];
     this.fSpd = formations.map((k) => FORMATIONS[k].spd); this.fDef = formations.map((k) => FORMATIONS[k].def);
     world = Math.max(120, Math.max(this.slots[0].halfWidth, this.slots[1].halfWidth, gap / 2 + Math.max(this.slots[0].depth, this.slots[1].depth)) + 70);
+    this.terrainId = terrain; this.tr = setTerrain(terrain, world);
     this.perSide = perSide; this.n = perSide * 2; this.world = world; this.corpseLife = corpseLife; this.corpseCap = corpseCap;
     const n = this.n; const A = (T, m) => (shared ? new T(new SharedArrayBuffer(m * T.BYTES_PER_ELEMENT)) : new T(m)); this.rand = rng(seed); this.time = 0; this.tickCount = 0; this.acc = 0; this.TICK = TICK;
     this.x = A(Float32Array, n); this.z = A(Float32Array, n); this.vx = A(Float32Array, n); this.vz = A(Float32Array, n);
@@ -158,7 +160,7 @@ export class Sim {
         if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; this.turn(i, Math.atan2(ex, ez), dt, 8); }
         if (!this.hitDone[i] && stateT[i] >= T_HIT) {
           this.hitDone[i] = 1;
-          if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (REACH + 0.5) ** 2 && this.rand() < 0.7 - this.fDef[team[j]]) this.damage(j, 28 + this.rand() * 22, i); }
+          if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (REACH + 0.5) ** 2 && this.rand() < 0.7 - this.fDef[team[j]]) this.damage(j, (28 + this.rand() * 22) * (this.tr.fx ? this.combatMul(i, j) : 1), i); }
         }
         if (stateT[i] >= D_ATTACK) { state[i] = ST.MOVE; cd[i] = 0.4 + this.rand() * 0.5; }
       } else if (st === ST.HIT) {
@@ -201,7 +203,8 @@ export class Sim {
           if (d < REACH * 0.92) { sp = 0; if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; } }
           else { sp = d > 7 ? 3.4 : 1.6; desX = ex / d; desZ = ez / d; }
         } else { sp = 1.4; const ox = 1 - me, ex = this.cenX[ox] - x[i], ez = this.cenZ[ox] - z[i], l = Math.hypot(ex, ez) || 1; desX = ex / l; desZ = ez / l; this.turn(i, Math.atan2(desX, desZ), dt, 4); }
-        sp *= spd[i] * this.fSpd[me];
+        if (this.tr.ford && sp > 0) { const q = this.fordSteer(i, desX, desZ, j >= 0 ? Math.hypot(x[j] - x[i], z[j] - z[i]) : 99, dir); desX = q[0]; desZ = q[1]; }
+        sp *= spd[i] * this.fSpd[me]; if (this.tr.fx && sp > 0) sp *= this.moveMul(i, desX, desZ);
         const a = Math.min(1, 5 * dt); vx[i] += (desX * sp - vx[i]) * a; vz[i] += (desZ * sp - vz[i]) * a;
       }
       if (st === ST.ATTACK) { vx[i] *= 0.7; vz[i] *= 0.7; }
@@ -243,6 +246,26 @@ export class Sim {
       this.state[i] = ST.CHEER; this.vx[i] = this.vz[i] = 0; this.tgt[i] = -1;
       this.setClip(i, CLIP.CHEER, this.rand() * 1.2);
     }
+  }
+  /** terrain speed: uphill and trees slow, water slows most (wading 0.62, deep 0.38) */
+  moveMul(i, dx, dz) {
+    const tr = this.tr, c = cellOf(tr, this.x[i], this.z[i]), k = tr.K[c]; let m = k === 2 ? 0.38 : k === 1 ? 0.62 : 1;
+    m *= 1 - 0.45 * (tr.F[c] / 255);
+    const l = Math.hypot(dx, dz); if (l > 0.01) { const up = (tr.Gx[c] * dx + tr.Gz[c] * dz) / l; m *= Math.max(0.5, Math.min(1.15, 1 - 2.5 * up)); }
+    return m;
+  }
+  /** terrain combat: high ground hits harder, trees give cover, fighting waist-deep in water is clumsy */
+  combatMul(i, j) {
+    const tr = this.tr, a = cellOf(tr, this.x[i], this.z[i]), b = cellOf(tr, this.x[j], this.z[j]);
+    let m = Math.max(0.7, Math.min(1.45, 1 + 0.045 * (tr.H[a] - tr.H[b])));
+    m *= 1 - 0.3 * (tr.F[b] / 255); if (tr.K[a] === 2) m *= 0.6; else if (tr.K[a] === 1) m *= 0.85; return m;
+  }
+  /** armies funnel toward the ford when the river is between them and the enemy */
+  fordSteer(i, dx, dz, d, dir) {
+    const f = this.tr.ford, x = this.x[i], z = this.z[i], dist = -z * dir - f.half;
+    if (dist < -2 || dist > 80 || d < 18 || Math.abs(x) < f.fh - 6) return [dx, dz];
+    const ex = (Math.max(-(f.fh - 8), Math.min(f.fh - 8, x)) - x), ez = -dir * (f.half + 2) - z, l = Math.hypot(ex, ez) || 1, w = 0.85 * (1 - dist / 80);
+    const ox = dx * (1 - w) + (ex / l) * w, oz = dz * (1 - w) + (ez / l) * w, ol = Math.hypot(ox, oz) || 1; return [ox / ol, oz / ol];
   }
   turn(i, target, dt, rate) {
     let d = target - this.yaw[i]; d = Math.atan2(Math.sin(d), Math.cos(d)); const m = rate * dt;
