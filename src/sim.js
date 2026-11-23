@@ -1,5 +1,5 @@
 // Headless battle simulation: spatial-hash combat for tens of thousands of spear soldiers.
-import { CLIP, CLIPS } from './clips.js';
+import { CLIP, CLIPS, CAV } from './clips.js';
 import { setTerrain, cellOf, heightAt } from './terrain.js';
 import { slots, FORMATIONS } from './formations.js';
 import { SiegeRules } from './siegerules.js';
@@ -9,29 +9,37 @@ const ROUTING = false; // soldiers fight on instead of running away
 const MR = 2, ROUT_AT = 0.16, RALLY_AT = 0.5, CELL = 2, REACH = 2.3, SEP = 0.9, AGGRO = 26, TICK = 0.05;
 export const ORD = { NONE: 0, ADVANCE: 1, HOLD: 2, FLANK: 3 };
 const D_HIT = CLIPS[CLIP.HIT].dur;
-export const UT = { HOPLITE: 0, HEAVY: 1, ARCHER: 2, JAVELIN: 3, COMMANDER: 4 };
+export const UT = { HOPLITE: 0, HEAVY: 1, ARCHER: 2, JAVELIN: 3, COMMANDER: 4, CAVALRY: 5 };
 export const TY = [
   { name: 'Hoplite', hp: [90, 120], spdMul: 1, reach: 2.3, dmg: [28, 50], cd: [0.4, 0.9], clip: CLIP.ATTACK, block: 0.1, range: 0, aggro: 26, rings: 13, kite: 0 },
   { name: 'Heavy shield-bearer', hp: [150, 190], spdMul: 0.8, reach: 2.2, dmg: [22, 40], cd: [0.5, 1.0], clip: CLIP.ATTACK, block: 0.3, range: 0, aggro: 24, rings: 13, kite: 0 },
   { name: 'Archer', hp: [60, 80], spdMul: 1.05, reach: 2.0, dmg: [16, 28], cd: [1.3, 1.9], clip: CLIP.SHOOT, block: 0, range: 52, speed: 40, kind: 0, aggro: 62, rings: 27, kite: 6 },
   { name: 'Javelin skirmisher', hp: [75, 95], spdMul: 1.1, reach: 2.0, dmg: [34, 52], cd: [1.8, 2.6], clip: CLIP.THROW, block: 0.05, range: 24, speed: 26, kind: 1, aggro: 34, rings: 15, kite: 0 },
   { name: 'Commander', hp: [210, 250], spdMul: 1, reach: 2.2, dmg: [35, 58], cd: [0.4, 0.8], clip: CLIP.ATTACK, block: 0.3, range: 0, aggro: 26, rings: 13, kite: 0 },
+  // mounted: fast, wide turning circle, long reach; a gallop into the enemy adds up to +charge of the damage
+  { name: 'Cavalry', hp: [140, 180], spdMul: 2.1, reach: 3.4, dmg: [26, 44], cd: [0.7, 1.3], clip: CLIP.ATTACK + CAV, block: 0.15, range: 0, aggro: 36, rings: 20, kite: 0, cb: CAV, turn: 0.4, sep: 1.5, charge: 1.0 },
 ];
-for (const t of TY) { t.dur = CLIPS[t.clip].dur; t.hit = CLIPS[t.clip].hit; t.stand = (t.range ? t.range : t.reach) * 0.92; }
+for (const t of TY) { t.cb = t.cb || 0; t.turn = t.turn || 1; t.sep = t.sep || 0.9; t.charge = t.charge || 0; t.dhit = CLIPS[CLIP.HIT + t.cb].dur; t.dur = CLIPS[t.clip].dur; t.hit = CLIPS[t.clip].hit; t.stand = (t.range ? t.range : t.reach) * 0.92; }
 export const COMPOSITIONS = {
   hoplites: { name: 'Hoplites only', hv: 0, ar: 0, jv: 0, cmd: 0 },
-  balanced: { name: 'Mixed army', hv: 0.1, ar: 0.15, jv: 0.15, cmd: 1 },
+  balanced: { name: 'Mixed army', hv: 0.1, ar: 0.15, jv: 0.15, cv: 0.06, cmd: 1 },
   archers: { name: 'Archer heavy', hv: 0.05, ar: 0.4, jv: 0.05, cmd: 1 },
   skirmish: { name: 'Skirmishers', hv: 0, ar: 0.2, jv: 0.45, cmd: 1 },
   elite: { name: 'Shield bearers', hv: 0.5, ar: 0.1, jv: 0, cmd: 1 },
+  cavalry: { name: 'Cavalry wings', hv: 0.05, ar: 0.1, jv: 0.05, cv: 0.3, cmd: 1 },
+  horde: { name: 'Mounted host', hv: 0, ar: 0.05, jv: 0, cv: 0.65, cmd: 1 },
 };
-const MAXA = 6000, GRAV = 9.8;
+const MAXA = 6000, GRAV = 9.8, SEPT = Float32Array.from(TY, (t) => t.sep);
 function assignTypes(sl, N, kind) {
   const c = COMPOSITIONS[kind] || COMPOSITIONS.balanced, ut = new Uint8Array(N);
   const order = [...Array(N).keys()].sort((a, b) => sl.d[a] - sl.d[b] || Math.abs(sl.x[a]) - Math.abs(sl.x[b]));
-  const nJ = Math.round(N * c.jv), nH = Math.round(N * c.hv), nA = Math.round(N * c.ar), nC = c.cmd ? Math.max(1, Math.round(N / 2500)) : 0;
+  const nJ = Math.round(N * c.jv), nH = Math.round(N * c.hv), nA = Math.round(N * c.ar), nC = c.cmd ? Math.max(1, Math.round(N / 2500)) : 0, nV = Math.round(N * (c.cv || 0));
   let p = 0; const put = (cnt, t) => { for (let k = 0; k < cnt && p < N; k++) ut[order[p++]] = t; };
   put(nJ, UT.JAVELIN); put(nH, UT.HEAVY); const hopStart = p; put(N - nJ - nH - nA, UT.HOPLITE); put(nA, UT.ARCHER);
+  if (nV) { // cavalry ride the wings: the hoplite slots furthest from the centre line
+    const wing = order.filter((k) => ut[k] === UT.HOPLITE).sort((u, v) => Math.abs(sl.x[v]) - Math.abs(sl.x[u]));
+    for (let k = 0; k < nV && k < wing.length; k++) ut[wing[k]] = UT.CAVALRY;
+  }
   if (nC) { // commanders stand a third of the way back through the hoplites, spread across the width
     const a = hopStart + Math.floor((p - nA - hopStart) * 0.3), b = Math.min(p - nA, a + Math.max(nC * 4, Math.floor((p - nA - hopStart) * 0.25)));
     const cand = order.slice(a, b).filter((k) => ut[k] === UT.HOPLITE).sort((u, v) => sl.x[u] - sl.x[v]);
@@ -62,13 +70,13 @@ export class Sim {
     this.tgt = A(Int32Array, n).fill(-1); this.deadQ = []; this.deadHead = 0;
     this.alive = A(Int32Array, 2); this.alive[0] = this.alive[1] = perSide; this.deaths = A(Int32Array, 2);
     this.meta = A(Float64Array, 4); this.hits = 0; this.hitEvents = []; // {x,z,kill}
-    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta','elev','prog','role','lad','sg'];
+    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','ord','ox','oz','alive','deaths','meta','elev','prog','role','lad','sg','utype'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n);
     this.cellOf = new Int32Array(n); this.frontZ = [0, 0]; this.cenX = [0, 0]; this.cenZ = [0, 0]; this.over = -1; // over: -1 running, else winning team
     // morale (sim-internal, not shared): 1 = steady, below ROUT_AT the unit breaks and runs
     this.morale = new Float32Array(n).fill(1); this.rout = new Uint8Array(n); this.fled = [0, 0]; this.routing = [0, 0];
     if (mode === 'siege') { this.siege = new SiegeRules(this); this.siege.layout(); } else this.layout(spacing, gap);
-    this.typeCount = [0, 0, 0, 0, 0]; for (let i = 0; i < this.n; i++) this.typeCount[this.utype[i]]++;
+    this.chg = new Float32Array(n); this.typeCount = [0, 0, 0, 0, 0, 0]; for (let i = 0; i < this.n; i++) this.typeCount[this.utype[i]]++;
   }
   layout(spacing, gap) {
     const N = this.perSide;
@@ -79,7 +87,7 @@ export class Sim {
         this.z[i] = -dir * (gap / 2 + sl.d[k]) + (this.rand() - 0.5) * jit; this.yaw[i] = t === 0 ? 0 : Math.PI;
         const ty = TY[types[k]]; this.utype[i] = types[k]; if (types[k] === UT.COMMANDER) this.cmdList.push(i);
         this.hp[i] = ty.hp[0] + this.rand() * (ty.hp[1] - ty.hp[0]); this.spd[i] = (0.9 + this.rand() * 0.2) * ty.spdMul; this.seed[i] = this.rand();
-        this.animT[i] = this.rand() * 0.8; this.clip[i] = CLIP.IDLE; this.prevClip[i] = CLIP.IDLE; this.cd[i] = this.rand() * 0.5;
+        this.animT[i] = this.rand() * 0.8; this.clip[i] = CLIP.IDLE + ty.cb; this.prevClip[i] = CLIP.IDLE + ty.cb; this.cd[i] = this.rand() * 0.5;
       }
     }
   }
@@ -163,10 +171,10 @@ export class Sim {
     if (this.hitEvents.length < 64) this.hitEvents.push({ x: this.x[j], z: this.z[j], kill: this.hp[j] <= 0 });
     if (this.hp[j] <= 0) {
       this.state[j] = ST.DEAD; this.stateT[j] = 0; this.vx[j] = this.vz[j] = 0;
-      this.setClip(j, this.seed[j] < 0.5 ? CLIP.DIE_BACK : CLIP.DIE_FWD, 0);
+      this.setClip(j, (this.seed[j] < 0.5 ? CLIP.DIE_BACK : CLIP.DIE_FWD) + TY[this.utype[j]].cb, 0);
       this.alive[this.team[j]]--; this.deaths[this.team[j]]++; this.deadQ.push(j); if (this.rout[j]) { this.rout[j] = 0; this.routing[this.team[j]]--; } this.shock(j);
     } else if (this.state[j] !== ST.ATTACK) {
-      this.state[j] = ST.HIT; this.stateT[j] = 0; this.setClip(j, CLIP.HIT, 0);
+      this.state[j] = ST.HIT; this.stateT[j] = 0; this.setClip(j, CLIP.HIT + TY[this.utype[j]].cb, 0);
       const dx = this.x[j] - this.x[from], dz = this.z[j] - this.z[from], l = Math.hypot(dx, dz) || 1; this.vx[j] = (dx / l) * 1.5; this.vz[j] = (dz / l) * 1.5;
     }
   }
@@ -201,11 +209,11 @@ export class Sim {
         if (!this.hitDone[i] && stateT[i] >= ty.hit) {
           this.hitDone[i] = 1; const buffed = this.tickCount - this.buffT[i] <= 2 ? 1 : 0;
           if (ty.range) this.fire(i, j, ty, buffed);
-          else if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (ty.reach + 0.5) ** 2 && this.rand() < 0.8 - TY[this.utype[j]].block - this.fDef[team[j]] + 0.05 * buffed) this.damage(j, (ty.dmg[0] + this.rand() * (ty.dmg[1] - ty.dmg[0])) * (1 + 0.2 * buffed) * (this.tr.fx ? this.combatMul(i, j) : 1) * (this.siege ? this.siege.dmgMul(i, j) : 1), i); }
+          else if (j >= 0 && state[j] !== ST.DEAD) { const ex = x[j] - x[i], ez = z[j] - z[i]; if (ex * ex + ez * ez < (ty.reach + 0.5) ** 2 && this.rand() < 0.8 - TY[this.utype[j]].block - this.fDef[team[j]] + 0.05 * buffed) this.damage(j, (ty.dmg[0] + this.rand() * (ty.dmg[1] - ty.dmg[0])) * (1 + 0.2 * buffed) * (ty.charge && this.chg[i] > 3.5 ? 1 + ty.charge * Math.min(1, (this.chg[i] - 3.5) / 3.5) : 1) * (this.tr.fx ? this.combatMul(i, j) : 1) * (this.siege ? this.siege.dmgMul(i, j) : 1), i); }
         }
         if (stateT[i] >= ty.dur) { state[i] = ST.MOVE; cd[i] = ty.cd[0] + this.rand() * (ty.cd[1] - ty.cd[0]); }
       } else if (st === ST.HIT) {
-        if (stateT[i] >= D_HIT) { state[i] = ST.MOVE; }
+        if (stateT[i] >= ty.dhit) { state[i] = ST.MOVE; }
       } else if (this.rout[i]) {
         // broken: sprint for the rear, bending away from whoever is nearest; leave the field at the back edge
         const j = tgt[i]; let ax = 0;
@@ -228,7 +236,7 @@ export class Sim {
           const engage = ty.range ? ty.stand : o === ORD.HOLD ? REACH * 1.4 : o === ORD.ADVANCE ? 9 : REACH * 1.05;
           if (d < engage) {
             this.turn(i, Math.atan2(ex, ez), dt, 7);
-            if (d < ty.stand) { if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; } }
+            if (d < ty.stand) { if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; this.chg[i] = ty.charge ? Math.hypot(vx[i], vz[i]) : 0; } }
             else { sp = 1.6; desX = ex / d; desZ = ez / d; }
           } else if (o === ORD.HOLD) {
             const hx = this.ox[i] - x[i], hz = this.oz[i] - z[i], hd = Math.hypot(hx, hz);
@@ -241,8 +249,8 @@ export class Sim {
         } else if (j >= 0) {
           const ex = x[j] - x[i], ez = z[j] - z[i], d = Math.hypot(ex, ez);
           this.turn(i, Math.atan2(ex, ez), dt, 7);
-          if (d < ty.stand) { sp = 0; if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; } if (ty.kite && d < ty.kite) { sp = 1.4; desX = -ex / d; desZ = -ez / d; } }
-          else { sp = d > (ty.range ? ty.range * 1.5 : 7) ? 3.4 : 1.6; desX = ex / d; desZ = ez / d; }
+          if (d < ty.stand) { sp = 0; if (cd[i] <= 0) { state[i] = ST.ATTACK; stateT[i] = 0; this.hitDone[i] = 0; this.chg[i] = ty.charge ? Math.hypot(vx[i], vz[i]) : 0; } if (ty.kite && d < ty.kite) { sp = 1.4; desX = -ex / d; desZ = -ez / d; } }
+          else { sp = d > (ty.range ? ty.range * 1.5 : ty.charge ? ty.stand + 0.5 : 7) ? 3.4 : 1.6; desX = ex / d; desZ = ez / d; }
         } else { sp = 1.4; const ox = 1 - me, ex = this.cenX[ox] - x[i], ez = this.cenZ[ox] - z[i], l = Math.hypot(ex, ez) || 1; desX = ex / l; desZ = ez / l; this.turn(i, Math.atan2(desX, desZ), dt, 4); }
         if (this.tr.ford && sp > 0) { const q = this.fordSteer(i, desX, desZ, j >= 0 ? Math.hypot(x[j] - x[i], z[j] - z[i]) : 99, dir); desX = q[0]; desZ = q[1]; }
         if (this.siege) { this.siege.steer(i, j, desX, desZ, sp); desX = this.siege.ox; desZ = this.siege.oz; sp = this.siege.osp; }
@@ -257,15 +265,22 @@ export class Sim {
         for (let dx = -1; dx <= 1; dx++) { const xx = cx + dx; if (xx < 0 || xx >= c) continue; const cc = zz * c + xx;
           for (let k = this.cellStart[cc], e = this.cellStart[cc + 1]; k < e; k++) { const j = this.order[k]; if (j === i) continue;
             const ex = x[i] - x[j], ez = z[i] - z[j], d2 = ex * ex + ez * ez;
-            if (d2 < SEP * SEP && !(this.siege && Math.abs(this.elev[i] - this.elev[j]) > 1.5)) { const d = Math.sqrt(d2) || 0.001, push = (SEP - d) / SEP; sx += (ex / d) * push; sz += (ez / d) * push; if (d2 === 0) { sx += (i & 1) - 0.5; } } } } }
-      x[i] += vx[i] * dt + sx * 0.32; z[i] += vz[i] * dt + sz * 0.32;
+            const sep = Math.max(ty.sep, SEPT[this.utype[j]]); if (d2 < sep * sep && !(this.siege && Math.abs(this.elev[i] - this.elev[j]) > 1.5)) { const d = Math.sqrt(d2) || 0.001, push = (sep - d) / sep; sx += (ex / d) * push; sz += (ez / d) * push; if (d2 === 0) { sx += (i & 1) - 0.5; } } } } }
+      const rel = ty.cb ? 0.55 : 0.32; x[i] += vx[i] * dt + sx * rel; z[i] += vz[i] * dt + sz * rel;
       if (x[i] < -this.world + 5) x[i] = -this.world + 5; else if (x[i] > this.world - 5) x[i] = this.world - 5;
       if (z[i] < -this.world + 5) z[i] = -this.world + 5; else if (z[i] > this.world - 5) z[i] = this.world - 5;
       if (this.siege) this.siege.post(i, dt);
       // animation selection
       const s = Math.hypot(vx[i], vz[i]);
       if (state[i] === ST.ATTACK) this.setClip(i, ty.clip, 0);
-      else if (state[i] === ST.HIT) this.setClip(i, CLIP.HIT, 0);
+      else if (state[i] === ST.HIT) this.setClip(i, CLIP.HIT + ty.cb, 0);
+      else if (ty.cb) { // mounted gaits: walk, trot, gallop, and a couched-lance charge when a target is near
+        if (s > 5.6 && tgt[i] >= 0) this.setClip(i, CAV + 8, (this.animT[i] % 1) * 0.48);
+        else if (s > 4.4) this.setClip(i, CAV + 2, (this.animT[i] % 1) * 0.56);
+        else if (s > 2.4) this.setClip(i, CAV + 7, (this.animT[i] % 1) * 0.6);
+        else if (s > 0.35) this.setClip(i, CAV + 1, (this.animT[i] % 1) * 1.0);
+        else if (s < 0.2) this.setClip(i, CAV, this.rand() * 2);
+      }
       else if (s > 2.6) this.setClip(i, CLIP.RUN, (this.animT[i] % 1) * 0.62);
       else if (s > 0.35) this.setClip(i, CLIP.WALK, (this.animT[i] % 1) * 0.8);
       else if (s < 0.2) this.setClip(i, CLIP.IDLE, this.rand() * 2);
@@ -324,7 +339,7 @@ export class Sim {
     for (let i = 0; i < this.n; i++) {
       if (this.removed[i] || this.state[i] === ST.DEAD) continue;
       this.state[i] = ST.CHEER; this.vx[i] = this.vz[i] = 0; this.tgt[i] = -1;
-      this.setClip(i, CLIP.CHEER, this.rand() * 1.2);
+      this.setClip(i, CLIP.CHEER + TY[this.utype[i]].cb, this.rand() * 1.2);
     }
   }
   /** terrain speed: uphill and trees slow, water slows most (wading 0.62, deep 0.38) */
@@ -348,7 +363,7 @@ export class Sim {
     const ox = dx * (1 - w) + (ex / l) * w, oz = dz * (1 - w) + (ez / l) * w, ol = Math.hypot(ox, oz) || 1; return [ox / ol, oz / ol];
   }
   turn(i, target, dt, rate) {
-    let d = target - this.yaw[i]; d = Math.atan2(Math.sin(d), Math.cos(d)); const m = rate * dt;
+    let d = target - this.yaw[i]; d = Math.atan2(Math.sin(d), Math.cos(d)); const m = rate * dt * TY[this.utype[i]].turn;
     this.yaw[i] += Math.max(-m, Math.min(m, d));
   }
   winner() { return this.over; }

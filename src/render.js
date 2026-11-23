@@ -14,7 +14,7 @@ const FOG = FOG_BASE;
 
 const COMMON_VS = /* glsl */`
 precision highp float; precision highp sampler2D;
-uniform sampler2D uBones; uniform vec4 uClips[10];
+uniform sampler2D uBones; uniform vec4 uClips[20];
 attribute vec4 iA; attribute vec4 iB; attribute vec4 iC; attribute float aMat; attribute vec3 aSkin;
 varying vec3 vN; varying float vMat; varying float vSeed; varying float vTeam; varying float vLY; varying float vDepth;
 void rows(int clip, float t, int bone, out vec4 r0, out vec4 r1, out vec4 r2) {
@@ -56,13 +56,14 @@ void main() {
 }`;
 const COMMON_FS = /* glsl */`
 precision highp float;
-uniform vec3 uPal[10]; uniform vec3 uTeam[4]; uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uAmbS; uniform vec3 uAmbG; uniform vec3 uFog; uniform float uFogD;
+uniform vec3 uPal[14]; uniform vec3 uTeam[4]; uniform vec3 uSun; uniform vec3 uSunCol; uniform vec3 uAmbS; uniform vec3 uAmbG; uniform vec3 uFog; uniform float uFogD;
 varying vec3 vN; varying float vMat; varying float vSeed; varying float vTeam; varying float vLY; varying float vDepth;
 void main() {
   int m = int(vMat + 0.5); vec3 base = uPal[m];
   int t = int(vTeam + 0.5);
   if (m == 1) base = uTeam[t * 2]; else if (m == 5) base = uTeam[t * 2 + 1];
   float v = 0.9 + 0.2 * fract(vSeed * 91.7); if (m == 0) base *= 0.88 + 0.24 * fract(vSeed * 37.1);
+  if (m == 10) { float k = fract(vSeed * 7.31); base = k < 0.4 ? base : k < 0.7 ? vec3(0.42, 0.2, 0.09) : k < 0.88 ? vec3(0.16, 0.11, 0.08) : vec3(0.07, 0.065, 0.06); }
   base *= v;
   vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
   float d = max(dot(n, uSun), 0.0);
@@ -77,8 +78,9 @@ precision highp float;
 uniform vec3 uRight; attribute vec2 corner; attribute vec4 iA; attribute vec4 iB;
 varying vec2 vUv; varying float vTeam; varying float vDead; varying float vSeed; varying float vDepth;
 void main() {
-  vDead = (iB.x > 4.5 && iB.x < 6.5) ? 1.0 : 0.0; vTeam = iB.z; vSeed = iB.w; vUv = corner + 0.5;
-  float w = vDead > 0.5 ? 1.9 : 1.1, h = vDead > 0.5 ? 0.7 : 2.6;
+  float cl = mod(iB.x, 10.0); bool cav = iB.z > 9.5 && iB.z < 11.5;
+  vDead = (cl > 4.5 && cl < 6.5) ? 1.0 : 0.0; vTeam = iB.z; vSeed = iB.w; vUv = corner + 0.5;
+  float w = vDead > 0.5 ? (cav ? 2.6 : 1.9) : (cav ? 2.2 : 1.1), h = vDead > 0.5 ? (cav ? 0.9 : 0.7) : (cav ? 2.9 : 2.6);
   vec3 wp = iA.xyz + uRight * corner.x * w + vec3(0.0, corner.y + 0.5, 0.0) * h;
   vec4 mv = viewMatrix * vec4(wp, 1.0); vDepth = -mv.z; gl_Position = projectionMatrix * mv;
 }`;
@@ -91,6 +93,17 @@ void main() {
   vec2 p = vUv; int t = int(mod(vTeam, 2.0) + 0.5); int ut = int(floor(vTeam * 0.5 + 0.01)); vec3 tun = uTeam[t * 2]; vec3 acc = uTeam[t * 2 + 1]; vec3 c; float d;
   if (vDead > 0.5) {
     d = length((p - vec2(0.5, 0.5)) * vec2(1.0, 2.2)) - 0.42; if (d > 0.0) discard; c = tun * 0.45;
+  } else if (ut == 5) { // horse and rider in profile, head to the right
+    vec2 m = vec2((p.x - 0.5) * 2.2, p.y * 2.9);
+    float barrel = seg(m, vec2(-0.5, 1.28), vec2(0.4, 1.3), 0.33), neck = seg(m, vec2(0.45, 1.45), vec2(0.82, 1.98), 0.14), head = seg(m, vec2(0.84, 1.98), vec2(1.0, 1.62), 0.09);
+    float legs = min(min(seg(m, vec2(0.42, 1.0), vec2(0.45, 0.04), 0.05), seg(m, vec2(0.28, 1.0), vec2(0.22, 0.04), 0.05)), min(seg(m, vec2(-0.5, 1.05), vec2(-0.55, 0.04), 0.055), seg(m, vec2(-0.36, 1.05), vec2(-0.3, 0.04), 0.055)));
+    float tail = seg(m, vec2(-0.78, 1.5), vec2(-0.86, 0.85), 0.04);
+    float rider = seg(m, vec2(-0.05, 1.7), vec2(-0.05, 2.3), 0.17), rhead = length(m - vec2(-0.05, 2.47)) - 0.09, lance = seg(m, vec2(0.25, 1.5), vec2(0.25, 2.85), 0.02);
+    float horse = min(min(min(barrel, neck), min(head, legs)), tail);
+    d = min(min(horse, rider), min(rhead, lance)); if (d > 0.0) discard;
+    float k = fract(vSeed * 7.31); vec3 coat = k < 0.4 ? vec3(0.38, 0.22, 0.12) : k < 0.7 ? vec3(0.42, 0.2, 0.09) : k < 0.88 ? vec3(0.16, 0.11, 0.08) : vec3(0.07, 0.065, 0.06);
+    c = coat; if (horse > 0.0) c = lance < 0.0 && rider > 0.0 && rhead > 0.0 ? vec3(0.4, 0.3, 0.2) : rhead < 0.0 ? vec3(0.62, 0.45, 0.2) : tun;
+    if (seg(m, vec2(-0.45, 1.5), vec2(0.2, 1.5), 0.04) < 0.0 && horse < 0.0) c = tun * 0.9;
   } else {
     float body = seg(p, vec2(0.46, 0.38), vec2(0.46, 0.7), 0.17);
     float head = length(p - vec2(0.46, 0.8)) - 0.075;
@@ -121,12 +134,12 @@ function instanced(src, max, withC) {
 export class Battlefield {
   constructor(scene, sim, look = {}) {
     this.scene = scene; this.look = look; this.sim = sim; const n = sim.n;
-    const fulls = [0, 1, 2, 3, 4].map((t) => buildSoldier(0, t)), mids = [0, 1, 2, 3, 4].map((t) => buildSoldier(1, t)), full = fulls[0], tc = sim.typeCount || [n, 0, 0, 0, 0];
+    const fulls = [0, 1, 2, 3, 4, 5].map((t) => buildSoldier(0, t)), mids = [0, 1, 2, 3, 4, 5].map((t) => buildSoldier(1, t)), full = fulls[0], tc = sim.typeCount || [n, 0, 0, 0, 0, 0];
     const bake = bakeAll(fulls); this.bake = bake;
     const tex = new THREE.DataTexture(bake.data, NB * 3, bake.totalFrames, THREE.RGBAFormat, THREE.FloatType);
     tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
     const clipU = bake.info.map((c) => new THREE.Vector4(c.first, c.count, c.dur, c.loop ? 1 : 0));
-    const pal = [THEME.skin, THEME.skin, THEME.bronze, THEME.wood, THEME.leather, THEME.skin, '#1b1410', '#2b1d14', '#8a6a45', '#d4a93a'].map(col);
+    const pal = [THEME.skin, THEME.skin, THEME.bronze, THEME.wood, THEME.leather, THEME.skin, '#1b1410', '#2b1d14', '#8a6a45', '#d4a93a', '#7a4a2a', '#1a1310', '#2a2420', '#d9d1c0'].map(col);
     const teamCols = [col(THEME.teamA), col(THEME.teamA).multiplyScalar(0.8), col(THEME.teamB), col(THEME.teamB).multiplyScalar(0.8)];
     const fog = col(THEME.haze), sun = new THREE.Vector3(0.45, 0.8, 0.35).normalize();
     this.uniforms = { uBones: { value: tex }, uClips: { value: clipU }, uPal: { value: pal }, uTeam: { value: teamCols }, uSun: { value: sun }, uFog: { value: fog }, uFogD: { value: FOG }, uRight: { value: new THREE.Vector3(1, 0, 0) }, uSkin: { value: col(THEME.skin) },
@@ -232,7 +245,7 @@ export class Battlefield {
     const ty = Math.tan((camera.fov * Math.PI) / 360) * 1.1, tx = ty * camera.aspect;
     this.uniforms.uRight.value.set(rx, 0, rz).normalize(); this.sky.position.set(cx, cy, cz); this.atmo.update(camera);
     const nr2 = q.nearR * q.nearR, mr2 = q.midR * q.midR;
-    let a = 0, b = 0, f = 0, cull = 0; const NT = this.nearT, MT = this.midT, an = this.an || (this.an = [0, 0, 0, 0, 0]), bn = this.bn || (this.bn = [0, 0, 0, 0, 0]); an.fill(0); bn.fill(0);
+    let a = 0, b = 0, f = 0, cull = 0; const NT = this.nearT, MT = this.midT, an = this.an || (this.an = [0, 0, 0, 0, 0, 0]), bn = this.bn || (this.bn = [0, 0, 0, 0, 0, 0]); an.fill(0); bn.fill(0);
     const FA = this.far.A.array, FB = this.far.B.array;
     const { x, z, vx, vz, yaw, state, clip, animT, prevClip, prevT, blend, team, seed, removed, utype, elev } = s;
     for (let i = 0; i < n; i++) {
@@ -247,25 +260,26 @@ export class Battlefield {
       const cl = CLIPS[clip[i]]; let t = animT[i] + (cl.speed ? dt * Math.min(1.8, Math.max(0.4, Math.hypot(vx[i], vz[i]) / cl.speed)) : dt);
       if (cl.loop) { if (t > cl.dur) t -= cl.dur; } else if (t > cl.dur) t = cl.dur;
       if (d2 < nr2 && a < q.nearCap) {
+        const wn = ut === 5 ? 1.7 : 1;
         const o = an[ut]++ * 4, A = NT[ut].A.array, Bb = NT[ut].B.array, C = NT[ut].C.array; A[o] = px; A[o + 1] = y; A[o + 2] = pz; A[o + 3] = yaw[i];
         Bb[o] = clip[i]; Bb[o + 1] = t; Bb[o + 2] = team[i]; Bb[o + 3] = seed[i];
-        C[o] = prevClip[i]; C[o + 1] = prevT[i]; C[o + 2] = Math.min(1, blend[i] + dt / 0.18); a++;
+        C[o] = prevClip[i]; C[o + 1] = prevT[i]; C[o + 2] = Math.min(1, blend[i] + dt / 0.18); a += wn;
       } else if (d2 < mr2 && b < q.midCap) {
         const o = bn[ut]++ * 4, A = MT[ut].A.array, Bb = MT[ut].B.array; A[o] = px; A[o + 1] = y; A[o + 2] = pz; A[o + 3] = yaw[i];
-        Bb[o] = clip[i]; Bb[o + 1] = t; Bb[o + 2] = team[i]; Bb[o + 3] = seed[i]; b++;
+        Bb[o] = clip[i]; Bb[o + 1] = t; Bb[o + 2] = team[i]; Bb[o + 3] = seed[i]; b += ut === 5 ? 1.8 : 1;
       } else {
         const o = f * 4; FA[o] = px; FA[o + 1] = y; FA[o + 2] = pz; FA[o + 3] = yaw[i];
         FB[o] = clip[i]; FB[o + 1] = t; FB[o + 2] = team[i] + 2 * ut; FB[o + 3] = seed[i]; f++;
       }
     }
     const up = (m, c, arrs) => { m.g.instanceCount = c; for (const at of arrs) { at.clearUpdateRanges(); at.addUpdateRange(0, Math.max(1, c) * 4); at.needsUpdate = true; } };
-    for (let t = 0; t < 5; t++) { up(NT[t], an[t], [NT[t].A, NT[t].B, NT[t].C]); up(MT[t], bn[t], [MT[t].A, MT[t].B]); this.meshesNear[t].visible = an[t] > 0; this.meshesMid[t].visible = bn[t] > 0; }
+    for (let t = 0; t < 6; t++) { up(NT[t], an[t], [NT[t].A, NT[t].B, NT[t].C]); up(MT[t], bn[t], [MT[t].A, MT[t].B]); this.meshesNear[t].visible = an[t] > 0; this.meshesMid[t].visible = bn[t] > 0; }
     up(this.far, f, [this.far.A, this.far.B]); this.meshFar.visible = f > 0;
     // projectiles (copied out of the shared sim buffers, nudged forward to hide the 20 Hz tick)
     { const ar = this.arrows, A = ar.A.array, Bq = ar.B.array, P = s.apos, D = s.adir; let k = 0;
       for (let i = 0; i < P.length; i += 4) { if (D[i + 3] === 0) continue; const sp = P[i + 3] > 0.5 ? 26 : 40, o = k * 4; A[o] = P[i] + D[i] * sp * dt; A[o + 1] = P[i + 1] + D[i + 1] * sp * dt; A[o + 2] = P[i + 2] + D[i + 2] * sp * dt; A[o + 3] = P[i + 3]; Bq[o] = D[i]; Bq[o + 1] = D[i + 1]; Bq[o + 2] = D[i + 2]; Bq[o + 3] = 1; k++; }
       up(ar, k, [ar.A, ar.B]); this.arrowMesh.visible = k > 0; this.counts.arrows = k; }
-    this.counts.near = a; this.counts.mid = b; this.counts.far = f; this.counts.culled = cull;
+    this.counts.near = Math.round(a); this.counts.mid = Math.round(b); this.counts.far = f; this.counts.culled = cull;
     // adapt LOD radii so counts hover under their caps
     q.nearR = Math.min(60, Math.max(8, q.nearR * (a >= q.nearCap ? 0.96 : a < q.nearCap * 0.7 ? 1.015 : 1)));
     q.midR = Math.min(260, Math.max(q.nearR + 20, q.midR * (b >= q.midCap ? 0.96 : b < q.midCap * 0.7 ? 1.015 : 1)));
