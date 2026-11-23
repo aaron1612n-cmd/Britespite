@@ -7,7 +7,7 @@ export const THEME = {
   panel: 'rgba(20,18,15,0.82)',
   teamA: '#b3352b', // crimson army
   teamB: '#2f5f9a', // blue army
-  skin: '#c89873',
+  skin: '#b98d68',
   bronze: '#a9772f',
   wood: '#6b4a2b',
   leather: '#3a2a1e',

@@ -67,7 +67,7 @@ export const POSES = [
     { t: 0.52, ...lunge, crx: 0.2, cry: 0.4, pz: 0.14, py: -0.1, urx: -1.3, frx: -0.15, ulx: -0.5, spy: 0.06, spz: 1 },
     { t: 0.68, lfy: 0.14, lfz: 0.2, rfz: -0.12, crx: 0.08, py: -0.05, spy: 0.5, spz: 0.8 },
     { t: 0.85 }], 0.85, false),
-  keyed([{ t: 0 }, { t: 0.1, pz: -0.1, prx: -0.1, crx: -0.3, hrx: -0.25, urx: 0.3, ulx: 0.2, frx: -0.6, spy: 1, spz: 0 }, { t: 0.25, pz: -0.06, crx: -0.15, hrx: -0.1 }, { t: 0.45 }], 0.45, false),
+  keyed([{ t: 0 }, { t: 0.1, pz: -0.1, prx: -0.1, crx: -0.3, hrx: -0.25, urx: 0.3, ulx: 0.2, frx: -0.6, spy: 0.8, spz: 0.55 }, { t: 0.25, pz: -0.06, crx: -0.15, hrx: -0.1 }, { t: 0.45 }], 0.45, false),
   keyed([
     { t: 0, ik: 0 },
     { t: 0.3, ik: 0, py: -0.25, prx: -0.12, crx: -0.1, hrx: -0.3, tlx: -0.6, trx: -0.6, slx: 1.2, srx: 1.2, urx: 0.2, ulx: 0.2 },

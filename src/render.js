@@ -54,7 +54,7 @@ void main() {
 }`;
 const COMMON_FS = /* glsl */`
 precision highp float;
-uniform vec3 uPal[6]; uniform vec3 uTeam[4]; uniform vec3 uSun; uniform vec3 uFog; uniform float uFogD;
+uniform vec3 uPal[9]; uniform vec3 uTeam[4]; uniform vec3 uSun; uniform vec3 uFog; uniform float uFogD;
 varying vec3 vN; varying float vMat; varying float vSeed; varying float vTeam; varying float vLY; varying float vDepth;
 void main() {
   int m = int(vMat + 0.5); vec3 base = uPal[m];
@@ -119,8 +119,8 @@ export class Battlefield {
     const tex = new THREE.DataTexture(bake.data, NB * 3, bake.totalFrames, THREE.RGBAFormat, THREE.FloatType);
     tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
     const clipU = bake.info.map((c) => new THREE.Vector4(c.first, c.count, c.dur, c.loop ? 1 : 0));
-    const pal = [THEME.skin, THEME.skin, THEME.bronze, THEME.wood, THEME.leather, THEME.skin].map(col);
-    const teamCols = [col(THEME.teamA), col(THEME.teamA).multiplyScalar(0.62), col(THEME.teamB), col(THEME.teamB).multiplyScalar(0.62)];
+    const pal = [THEME.skin, THEME.skin, THEME.bronze, THEME.wood, THEME.leather, THEME.skin, '#1b1410', '#2b1d14', '#8a6a45'].map(col);
+    const teamCols = [col(THEME.teamA), col(THEME.teamA).multiplyScalar(0.8), col(THEME.teamB), col(THEME.teamB).multiplyScalar(0.8)];
     const fog = col(THEME.haze), sun = new THREE.Vector3(0.45, 0.8, 0.35).normalize();
     this.uniforms = { uBones: { value: tex }, uClips: { value: clipU }, uPal: { value: pal }, uTeam: { value: teamCols }, uSun: { value: sun }, uFog: { value: fog }, uFogD: { value: FOG }, uRight: { value: new THREE.Vector3(1, 0, 0) }, uSkin: { value: col(THEME.skin) } };
     const mkMat = (defs) => new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: COMMON_VS, fragmentShader: COMMON_FS, defines: defs, side: THREE.DoubleSide });
@@ -134,7 +134,7 @@ export class Battlefield {
     this.far = { g: ig, A: mkI('iA'), B: mkI('iB') }; ig.instanceCount = 0;
     this.meshFar = new THREE.Mesh(ig, new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: IMP_VS, fragmentShader: IMP_FS, side: THREE.DoubleSide }));
     for (const m of [this.meshNear, this.meshMid, this.meshFar]) { m.frustumCulled = false; scene.add(m); }
-    this.q = { nearR: 26, midR: 100, nearCap: 1500, midCap: 7000 };
+    this.q = { nearR: 26, midR: 100, nearCap: 900, midCap: 5000 };
     this.counts = { near: 0, mid: 0, far: 0, culled: 0 };
     this.buildTerrain(sim.world); this.buildSky();
     scene.fog = new THREE.FogExp2(THEME.haze, FOG);
@@ -202,5 +202,5 @@ export class Battlefield {
     q.nearR = Math.min(60, Math.max(8, q.nearR * (a >= q.nearCap ? 0.96 : a < q.nearCap * 0.7 ? 1.015 : 1)));
     q.midR = Math.min(260, Math.max(q.nearR + 20, q.midR * (b >= q.midCap ? 0.96 : b < q.midCap * 0.7 ? 1.015 : 1)));
   }
-  setQuality(k) { this.q.nearCap = Math.round(1500 * k); this.q.midCap = Math.round(7000 * k); }
+  setQuality(k) { this.q.nearCap = Math.round(900 * k); this.q.midCap = Math.round(5000 * k); }
 }
