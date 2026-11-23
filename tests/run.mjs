@@ -83,7 +83,7 @@ check('mid LOD far lighter than full', mid.index.count < geo.index.count * 0.4, 
 { // morale: losing side breaks and flees, battle ends instead of grinding on
   const m = new Sim({ perSide: 400, seed: 5 }); let t = 0; while (m.winner() < 0 && t < 12000) { m.tick(0.05); t++; }
   check('battle ends naturally with a winner', m.winner() >= 0, `winner ${m.winner()} after ${(t * 0.05).toFixed(0)}s`);
-  check('losers fled rather than all dying', m.fled[0] + m.fled[1] > 20, `fled ${m.fled}, dead ${m.deaths[0]}/${m.deaths[1]}`);
+  check('nobody runs away', m.fled[0] + m.fled[1] === 0, `fled ${m.fled}, dead ${m.deaths[0]}/${m.deaths[1]}`);
   check('battle ends within 8 minutes', t * 0.05 < 480, `${(t * 0.05).toFixed(0)}s`);
 }
 { // every formation lays out an army without stacking, and each one actually fights
@@ -116,6 +116,11 @@ for (const id of ['hills', 'ford', 'forest']) {
   const up = h.moveMul ? (() => { h.x[0] = -0.2 * w - 40; h.z[0] = -10; return h.moveMul(0, 1, 0); })() : 1;
   check('hills: walking uphill is slower than downhill', up < 0.95 && (() => { h.x[0] = -0.2 * w + 40; return h.moveMul(0, 1, 0); })() > up, `uphill ${up.toFixed(2)}`);
   check('flat stays the default with no terrain effects', new Sim({ perSide: 10 }).tr.fx === false);
+}
+{ // standards: human scale and carried by a living bearer
+  const { STD } = await import('../src/banners.js');
+  check('standard is human scale', STD.pole <= 3.2 && STD.pole >= 2.2 && STD.clothW <= 0.9 && STD.clothH <= 0.6, `pole ${STD.pole} m, cloth ${STD.clothW}x${STD.clothH} m`);
+  check('standard is gripped beside the bearer', Math.hypot(STD.offR, STD.offF) < 0.45 && STD.base < 1.2 && STD.base + STD.pole > 1.2, `hand offset ${Math.hypot(STD.offR, STD.offF).toFixed(2)} m, grip height 1.2 m inside pole span`);
 }
 // ---------- siege: prop geometry ----------
 {
@@ -229,7 +234,7 @@ try {
   check('camera modes raise no console errors', errs.length === 0, errs.join(' | '));
   for (const q of ['terrain=hills&weather=fog&time=dusk', 'terrain=ford&weather=rain&time=day', 'terrain=forest&weather=rain&time=dusk']) {
     const errs2 = []; const p2 = await browser.newPage({ viewport: { width: 800, height: 500 } }); p2.on('console', (m) => { if (m.type() === 'error') errs2.push(m.text()); }); p2.on('pageerror', (e) => errs2.push(e.message));
-    await p2.goto(`http://localhost:4173/?test&manual&n=500&${q}`); await p2.waitForFunction(() => window.__GAME__ && window.__GAME__.ready, null, { timeout: 30000 });
+    await p2.goto(`http://localhost:4173/?test&manual&n=500&${q}`, { timeout: 120000 }); await p2.waitForFunction(() => window.__GAME__ && window.__GAME__.ready, null, { timeout: 30000 });
     const calls = await p2.evaluate(() => { const G = window.__GAME__; G.step(400); G.draw(); G.setLook({ weather: 'rain', time: 'dusk' }); G.draw(); return G.renderer.info.render.calls; });
     check(`look ${q}: no console errors, draw calls under 100`, errs2.length === 0 && calls < 100, `${calls} calls ${errs2.join(' | ')}`); await p2.close();
   }

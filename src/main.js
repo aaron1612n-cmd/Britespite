@@ -151,7 +151,7 @@ function frame(now) {
   let alpha = 0;
   if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
   if (!G.paused) dir.rec.record(sim, dt);
-  const rs = dir.update(dt, sim, alpha); battle.sim = rs || sim; battle.update(camera, rs ? 0 : alpha); battle.sim = sim; if (flags) { flags.update(dt, now / 1000); }
+  const rs = dir.update(dt, sim, alpha); battle.sim = rs || sim; battle.update(camera, rs ? 0 : alpha); battle.sim = sim; if (flags) { flags.update(dt, now / 1000, alpha); }
   cmdr.draw(reduced);
   renderer.render(scene, camera);
   fAcc += dt; fN++;
@@ -174,7 +174,7 @@ function adapt() {
 function hud() {
   $('ca').textContent = sim.alive[0].toLocaleString(); $('cb').textContent = sim.alive[1].toLocaleString();
   const c = battle.counts; $('stats').textContent = `${G.fps.toFixed(0)} fps · ${(sim.n - 0).toLocaleString()} units\nnear ${c.near} · mid ${c.mid} · far ${c.far}`;
-  if (flags) flags.refresh(false);
+  if (flags) flags.refresh();
   const al = sim.alive, de = sim.deaths, P = G.init[0], P1 = G.init[1], t = (id, v) => ($(id).textContent = v.toLocaleString());
   t('sa', al[0]); t('sb', al[1]); t('ka', de[1]); t('kb', de[0]); t('xa', de[0]); t('xb', de[1]);
   $('pa').textContent = Math.round((al[0] / P) * 100) + '%'; $('pb').textContent = Math.round((al[1] / P1) * 100) + '%';
