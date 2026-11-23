@@ -25,6 +25,8 @@
   .swatch { min-width:44px; padding:0 10px; display:inline-flex; align-items:center; gap:6px; } .swatch i { width:14px; height:14px; border:1px solid #fff8; display:inline-block; }
   @media (prefers-reduced-motion:reduce) { .split i { transition:none; } }
   .stats { background:var(--panel); padding:6px 10px; font-size:12px; color:var(--muted); width:max-content; max-width:80vw; white-space:pre; }
+  .camstat { display:none; align-items:center; gap:6px; flex-wrap:wrap; pointer-events:auto; background:var(--panel); border-left:5px solid var(--accent); padding:4px 4px 4px 10px; font-size:13px; max-width:88vw; }
+  .camstat button { min-height:44px; font-size:13px; }
   .bar { position:fixed; right:max(12px,env(safe-area-inset-right)); top:max(12px,env(safe-area-inset-top)); display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; max-width:60vw; }
   button, select { font:600 14px var(--mono); color:var(--paper); background:var(--panel); border:1px solid #6b6455; padding:0 12px; min-height:44px; min-width:44px; cursor:pointer; border-radius:2px; }
   button:hover, select:hover { border-color:var(--accent); }
@@ -62,10 +64,13 @@
     </tbody></table>
     <div class="split"><i id="bara"></i><i id="barb"></i></div>
   </div>
+  <div class="camstat" id="camstat"><span id="ctext"></span><button id="cview"></button><button id="cspeed"></button><button id="cfree">Free cam</button></div>
   <div class="stats" id="stats"></div>
 </div>
 <div class="bar">
   <button id="cmdtoggle" aria-pressed="false" title="Command mode (Tab)">Command</button>
+  <button id="cine" aria-pressed="false" title="Cinematic camera (K)">Cinema</button>
+  <button id="replay" aria-pressed="false" title="Replay last seconds (Y)">Replay</button>
   <button id="pause" aria-pressed="false" title="Pause (P)">Pause</button>
   <button id="ff" aria-pressed="false" title="Fast forward (F)">1×</button>
   <button id="mute" aria-pressed="true" title="Sound (M)">Sound off</button>

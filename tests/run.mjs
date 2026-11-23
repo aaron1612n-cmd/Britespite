@@ -118,6 +118,26 @@ try {
   check('free camera stays above ground', r.y > 0);
   const ff = await page.evaluate(() => { const b = document.getElementById('ff'); b.click(); const a = b.textContent; b.click(); b.click(); b.click(); return [a, b.textContent]; });
   check('fast-forward button cycles 1x/2x/4x/8x', ff[0] === '2×' && ff[1] === '1×', ff.join(' -> '));
+  const cam = await page.evaluate(async () => {
+    const G = window.__GAME__, D = G.dir, o = {}; await G.restart(500); const S = G.sim; G.setCam('front'); G.step(1100);
+    // record ~4s with real recorder
+    for (let i = 0; i < 90; i++) { G.step(1); D.rec.record(S, 0.05); }
+    o.recSec = D.rec.seconds;
+    const i = D.pick(S, innerWidth / 2, innerHeight / 2, innerWidth, innerHeight, 2000); o.picked = i;
+    D.follow(i, S); for (let k = 0; k < 40; k++) { D.update(0.05, S, 0); G.draw(); } o.fv = D.cam.position.distanceTo(D.pos);
+    const p = [S.x[i], S.z[i]]; o.followDist = Math.hypot(D.cam.position.x - p[0], D.cam.position.z - p[1]);
+    D.toggleView(); for (let k = 0; k < 20; k++) { D.update(0.05, S, 0); G.draw(); } o.fpDist = Math.hypot(D.cam.position.x - S.x[i], D.cam.position.z - S.z[i]); o.fpY = D.cam.position.y;
+    D.setMode('cine'); for (let k = 0; k < 400; k++) { D.update(0.05, S, 0); } G.draw(); o.cine = D.cam.position.toArray().every(Number.isFinite) && !!D.hot;
+    D.startReplay(); let rs = null; for (let k = 0; k < 60; k++) { rs = D.update(0.05, S, 0); G.battle.sim = rs || S; G.battle.update(G.camera, 0); G.battle.sim = S; } o.replay = !!rs; o.replayFinite = [...D.rsim.x].every(Number.isFinite);
+    D.stopReplay(); D.setMode('free'); o.free = D.mode === 'free'; o.camFinite = D.cam.position.toArray().every(Number.isFinite);
+    return o;
+  });
+  check('record keeps a few seconds of battle', cam.recSec > 3, `${cam.recSec.toFixed(1)} s`);
+  check('follow-cam picks a soldier and trails it', cam.picked >= 0 && cam.followDist < 12, `dist ${cam.followDist?.toFixed(1)} m`);
+  check('first-person view sits at the soldier, above ground', cam.fpDist < 2 && cam.fpY > 1, `dist ${cam.fpDist?.toFixed(2)} y ${cam.fpY?.toFixed(2)}`);
+  check('cinematic camera finds the fight', cam.cine);
+  check('replay plays recorded frames and exits cleanly', cam.replay && cam.replayFinite && cam.free && cam.camFinite);
+  check('camera modes raise no console errors', errs.length === 0, errs.join(' | '));
   const t0 = await page.evaluate(() => { const G = window.__GAME__, a = performance.now(); for (let i = 0; i < 10; i++) G.draw(); return (performance.now() - a) / 10; });
   console.log(`INFO  software-GL frame cost ${t0.toFixed(0)} ms (CPU submit only, headless software GL; real FPS needs a GPU)`);
 } finally { await browser.close(); srv.kill(); }{ // commander orders

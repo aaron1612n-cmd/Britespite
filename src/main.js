@@ -9,6 +9,7 @@ import { heightAt } from './terrain.js';
 import { FORMATIONS, FORMATION_KEYS } from './formations.js';
 import { Standards } from './banners.js';
 import { Commander } from './command.js';
+import { CamDirector } from './camdirector.js';
 
 applyTheme();
 const $ = (id) => document.getElementById(id);
@@ -27,6 +28,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 6000);
 const fly = new FlyCam(camera, canvas);
 const audio = new BattleAudio();
+const dir = new CamDirector({ camera, fly, reduced });
 const G = (window.__GAME__ = { paused: false, fps: 0, frame: 0, errors: [] });
 addEventListener('error', (e) => G.errors.push(String(e.message)));
 
@@ -59,15 +61,16 @@ async function start(n) {
   G.sim = sim; G.battle = battle; if (sim.setSpeed) sim.setSpeed(speed); $('banner').style.display = 'none';
   const files = Math.ceil(Math.sqrt(n * 2.8)), w = files * 1.2, rz = -(80 + Math.ceil(n / files) * 1.2 + 14);
   G.view = { front: [w * 0.08, 9, rz, 0, 3, 90], over: [0, Math.max(50, w * 0.5), rz - w * 0.25, 0, 0, 60], ground: [-w * 0.5 + 8, 2.0, -86, -w * 0.5 + 40, 2.2, -82] };
-  setCam(reduced || testMode ? 'front' : null);
+  dir.reset(sim); setCam(reduced || testMode ? 'front' : null);
 }
 function setCam(name) {
+  dir.stopReplay(); dir.setMode('free');
   if (name) { fly.lookAt(...G.view[name]); sweep = null; return; }
   const a = G.view.over, b = G.view.front; sweep = { t: 0, a, b }; fly.lookAt(...a);
 }
 let sweep = null;
 function runSweep(dt) {
-  if (!sweep) return; if (fly.input) { sweep = null; return; }
+  if (!sweep) return; if (fly.input || dir.active) { sweep = null; return; }
   sweep.t += dt / 5; const k = Math.min(1, sweep.t), e = k * k * (3 - 2 * k), v = sweep.a.map((x, i) => x + (sweep.b[i] - x) * e);
   fly.lookAt(...v); if (k >= 1) sweep = null;
 }
@@ -87,16 +90,40 @@ $('restart').onclick = () => start(perSide);
 const SPEEDS = [1, 2, 4, 8], ffBtn = $('ff'); let speed = 1;
 function setSpeed(v) { speed = v; ffBtn.textContent = v + '×'; ffBtn.setAttribute('aria-pressed', v > 1); if (sim && sim.setSpeed) sim.setSpeed(v); G.speed = v; }
 ffBtn.onclick = () => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]);
+const cineBtn = $('cine'), replayBtn = $('replay'), camstat = $('camstat'), cview = $('cview'), cspeed = $('cspeed');
+const sideName = (t) => pal[ci[t]].n;
+dir.onChange = () => {
+  cineBtn.setAttribute('aria-pressed', dir.mode === 'cine'); replayBtn.setAttribute('aria-pressed', dir.replaying);
+  const f = dir.mode === 'follow', r = dir.replaying; camstat.style.display = dir.active || r ? 'flex' : 'none';
+  $('ctext').textContent = (r ? 'REPLAY · ' : '') + (f ? `Following ${sideName(sim.team[dir.target])} soldier` : dir.mode === 'cine' ? 'Cinematic camera' : 'Free camera');
+  cview.style.display = f ? '' : 'none'; cview.textContent = dir.view === 'chase' ? 'First person' : 'Chase view'; cspeed.style.display = r ? '' : 'none'; cspeed.textContent = `${dir.speed}× speed`;
+  $('cfree').textContent = r ? 'Exit replay' : 'Free cam';
+};
+cineBtn.onclick = () => dir.setMode(dir.mode === 'cine' ? 'free' : 'cine');
+replayBtn.onclick = () => (dir.replaying ? dir.stopReplay() : dir.startReplay() || flash('Not enough battle recorded yet'));
+cview.onclick = () => dir.toggleView(); cspeed.onclick = () => dir.cycleSpeed();
+$('cfree').onclick = () => (dir.replaying ? dir.stopReplay() : dir.setMode('free'));
+const camSrc = () => (dir.replaying ? dir.rsim : sim);
+function flash(t) { hint.textContent = t; hint.classList.remove('off'); clearTimeout(flash.t); flash.t = setTimeout(() => hint.classList.add('off'), 2200); }
+function followAt(px, py, reach) { const i = dir.pick(camSrc(), px, py, innerWidth, innerHeight, reach); if (i >= 0) { dir.follow(i, camSrc()); return true; } return false; }
+let tap = null;
+canvas.addEventListener('pointerdown', (e) => { tap = e.isPrimary && !cmdr.on ? { x: e.clientX, y: e.clientY, t: performance.now() } : null; });
+canvas.addEventListener('pointerup', (e) => {
+  if (!tap || !e.isPrimary || !sim || cmdr.on) return; const m = Math.hypot(e.clientX - tap.x, e.clientY - tap.y), d = performance.now() - tap.t; tap = null;
+  if (m > 8 || d > 450) return; const locked = document.pointerLockElement === canvas; followAt(locked ? innerWidth / 2 : e.clientX, locked ? innerHeight / 2 : e.clientY, locked ? 60 : e.pointerType === 'touch' ? 48 : 30);
+});
 const hint = $('hint'); let tut = 0;
 const TUT = coarse
-  ? ['Left pad: fly. Drag anywhere else: look.', '▲ ▼ change height. » is turbo.', '» is turbo. 1× / 2× speeds up the battle. Fly down to the front line.']
-  : ['Click to look around. WASD flies, Space / C up and down.', 'Shift is turbo. Mouse wheel changes speed.', 'Keys 1, 2, 3 jump to the field. Tab opens Command mode. F fast-forwards, P pauses, M sound.'];
+  ? ['Left pad: fly. Drag anywhere else: look.', '▲ ▼ change height. » is turbo.', '» is turbo. 1× / 2× speeds up the battle. Fly down to the front line.', 'Tap a soldier to follow them. Cinema and Replay are up top.']
+  : ['Click to look around. WASD flies, Space / C up and down.', 'Shift is turbo. Mouse wheel changes speed.', 'Keys 1, 2, 3 jump to the field. Tab opens Command mode. F fast-forwards, P pauses, M sound.', 'Click a soldier to follow. G follows the one in the centre. V view, K cinema, Y replay, Esc free.'];
 function showTut(i) { tut = i; if (i >= TUT.length) { hint.classList.add('off'); return; } hint.textContent = TUT[i]; hint.classList.remove('off'); }
 $('help').onclick = () => { setCam('front'); showTut(0); tutT = 0; };
 showTut(0); let tutT = 0, tutMoved = false;
 addEventListener('keydown', (e) => {
   audio.start(); if (e.repeat) return;
   if (e.code === 'KeyP') setPaused(!G.paused); else if (e.code === 'KeyF') ffBtn.click(); else if (e.code === 'KeyM') setMuted(!audio.muted); else if (e.code === 'KeyT') setStats(!showStats); else if (e.code === 'KeyR') start(perSide); else if (e.code === 'KeyH') $('help').click();
+  else if (e.code === 'KeyK') cineBtn.click(); else if (e.code === 'KeyY') replayBtn.click(); else if (e.code === 'KeyV' && dir.mode === 'follow') dir.toggleView();
+  else if (e.code === 'KeyG') { if (!followAt(innerWidth / 2, innerHeight / 2, 400)) flash('No soldier in view'); } else if (e.code === 'Escape') $('cfree').click();
   else if (e.code === 'Digit1') setCam('front'); else if (e.code === 'Digit2') setCam('over'); else if (e.code === 'Digit3') setCam('ground');
 });
 addEventListener('pointerdown', () => { if (!audio.ctx && !audio.muted) audio.start(); }, { once: false });
@@ -106,10 +133,12 @@ let ev = 0, last = performance.now(), fAcc = 0, fN = 0, statT = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000); last = now; G.frame++;
-  runSweep(dt); fly.update(dt); if (!sim) return;
+  if (dir.active && dir.userTookOver()) { dir.stopReplay(); dir.setMode('free'); }
+  runSweep(dt); if (!dir.active) fly.update(dt); if (!sim) return;
   let alpha = 0;
   if (!G.paused && !G.manual) alpha = sim.advance(dt, speed); else alpha = G.manual ? 0 : sim.acc / sim.TICK;
-  battle.update(camera, alpha); if (flags) { flags.update(dt, now / 1000); }
+  if (!G.paused) dir.rec.record(sim, dt);
+  const rs = dir.update(dt, sim, alpha); battle.sim = rs || sim; battle.update(camera, rs ? 0 : alpha); battle.sim = sim; if (flags) { flags.update(dt, now / 1000); }
   cmdr.draw(reduced);
   renderer.render(scene, camera);
   fAcc += dt; fN++;
@@ -141,7 +170,7 @@ function hud() {
 }
 G.step = (ticks = 1) => { if (!G.worker) for (let i = 0; i < ticks; i++) sim.tick(sim.TICK); };
 G.draw = () => { battle.update(camera, 0); renderer.render(scene, camera); };
-G.renderer = renderer; G.setCam = setCam; G.restart = start; G.setPaused = setPaused; G.fly = fly; G.camera = camera;
+G.dir = dir; G.renderer = renderer; G.setCam = setCam; G.restart = start; G.setPaused = setPaused; G.fly = fly; G.camera = camera;
 G.manual = qs.has('manual');
 start(perSide); setMuted(true);
 G.ready = true;
