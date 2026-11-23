@@ -8,18 +8,20 @@ const D_ATTACK = CLIPS[CLIP.ATTACK].dur, D_HIT = CLIPS[CLIP.HIT].dur, T_HIT = CL
 function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 export class Sim {
-  constructor({ perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000 } = {}) {
+  constructor({ shared = false, perSide = 1000, seed = 1, spacing = 1.2, gap = 160, world = 900, corpseLife = 18, corpseCap = 4000 } = {}) {
     const files0 = Math.ceil(Math.sqrt(perSide * 2.8)), ranks0 = Math.ceil(perSide / files0);
     world = Math.max(120, Math.max((files0 * spacing) / 2, gap / 2 + ranks0 * spacing) + 70);
     this.perSide = perSide; this.n = perSide * 2; this.world = world; this.corpseLife = corpseLife; this.corpseCap = corpseCap;
-    const n = this.n; this.rand = rng(seed); this.time = 0; this.tickCount = 0; this.acc = 0; this.TICK = TICK;
-    this.x = new Float32Array(n); this.z = new Float32Array(n); this.vx = new Float32Array(n); this.vz = new Float32Array(n);
-    this.yaw = new Float32Array(n); this.hp = new Float32Array(n); this.stateT = new Float32Array(n); this.cd = new Float32Array(n);
-    this.animT = new Float32Array(n); this.prevT = new Float32Array(n); this.blend = new Float32Array(n).fill(1);
-    this.spd = new Float32Array(n); this.team = new Uint8Array(n); this.state = new Uint8Array(n); this.clip = new Uint8Array(n);
-    this.prevClip = new Uint8Array(n); this.removed = new Uint8Array(n); this.hitDone = new Uint8Array(n); this.seed = new Float32Array(n);
-    this.tgt = new Int32Array(n).fill(-1); this.deadQ = []; this.deadHead = 0;
-    this.alive = [perSide, perSide]; this.deaths = [0, 0]; this.hits = 0; this.hitEvents = []; // {x,z,kill}
+    const n = this.n; const A = (T, m) => (shared ? new T(new SharedArrayBuffer(m * T.BYTES_PER_ELEMENT)) : new T(m)); this.rand = rng(seed); this.time = 0; this.tickCount = 0; this.acc = 0; this.TICK = TICK;
+    this.x = A(Float32Array, n); this.z = A(Float32Array, n); this.vx = A(Float32Array, n); this.vz = A(Float32Array, n);
+    this.yaw = A(Float32Array, n); this.hp = A(Float32Array, n); this.stateT = A(Float32Array, n); this.cd = A(Float32Array, n);
+    this.animT = A(Float32Array, n); this.prevT = A(Float32Array, n); this.blend = A(Float32Array, n).fill(1);
+    this.spd = A(Float32Array, n); this.team = A(Uint8Array, n); this.state = A(Uint8Array, n); this.clip = A(Uint8Array, n);
+    this.prevClip = A(Uint8Array, n); this.removed = A(Uint8Array, n); this.hitDone = A(Uint8Array, n); this.seed = A(Float32Array, n);
+    this.tgt = A(Int32Array, n).fill(-1); this.deadQ = []; this.deadHead = 0;
+    this.alive = A(Int32Array, 2); this.alive[0] = this.alive[1] = perSide; this.deaths = A(Int32Array, 2);
+    this.meta = A(Float64Array, 4); this.hits = 0; this.hitEvents = []; // {x,z,kill}
+    this.fieldNames = ['x','z','vx','vz','yaw','hp','stateT','cd','animT','prevT','blend','spd','team','state','clip','prevClip','removed','hitDone','seed','alive','deaths','meta'];
     this.cells = Math.ceil((world * 2) / CELL); this.cellStart = new Int32Array(this.cells * this.cells + 1); this.order = new Int32Array(n);
     this.cellOf = new Int32Array(n); this.frontZ = [0, 0];
     this.layout(spacing, gap);
@@ -92,7 +94,7 @@ export class Sim {
   /** advance by real dt (fixed 20 Hz internal ticks) */
   advance(dt) { this.acc += dt; let k = 0; while (this.acc >= TICK && k < 4) { this.tick(TICK); this.acc -= TICK; k++; } if (k === 4) this.acc = 0; return this.acc / TICK; }
   tick(dt) {
-    const n = this.n, c = this.cells; this.time += dt; this.tickCount++; this.hitEvents.length = 0;
+    const n = this.n, c = this.cells; this.time += dt; this.tickCount++; this.meta[0] = performance.timeOrigin + performance.now(); this.meta[1] = this.tickCount; this.hitEvents.length = 0;
     this.buildGrid();
     const { x, z, vx, vz, yaw, team, state, stateT, cd, tgt, spd, clip } = this;
     for (let i = 0; i < n; i++) {
@@ -133,7 +135,7 @@ export class Sim {
           for (let k = this.cellStart[cc], e = this.cellStart[cc + 1]; k < e; k++) { const j = this.order[k]; if (j === i) continue;
             const ex = x[i] - x[j], ez = z[i] - z[j], d2 = ex * ex + ez * ez;
             if (d2 < SEP * SEP) { const d = Math.sqrt(d2) || 0.001, push = (SEP - d) / SEP; sx += (ex / d) * push; sz += (ez / d) * push; if (d2 === 0) { sx += (i & 1) - 0.5; } } } } }
-      x[i] += vx[i] * dt + sx * 0.18; z[i] += vz[i] * dt + sz * 0.18;
+      x[i] += vx[i] * dt + sx * 0.32; z[i] += vz[i] * dt + sz * 0.32;
       if (x[i] < -this.world + 5) x[i] = -this.world + 5; else if (x[i] > this.world - 5) x[i] = this.world - 5;
       if (z[i] < -this.world + 5) z[i] = -this.world + 5; else if (z[i] > this.world - 5) z[i] = this.world - 5;
       // animation selection
